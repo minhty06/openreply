@@ -161,6 +161,32 @@ export async function sendPrivateReply(
   return handleResponse(response);
 }
 
+/** An optional web_url button pointing at the business's own IG profile. */
+export interface ProfileButton {
+  username: string;
+  title: string;
+}
+
+/**
+ * Build the follow-prompt button list. The profile link is placed first because
+ * it is the action the commenter takes first — follow, then confirm. Meta caps
+ * button titles at 20 chars and the template at 3 buttons; we send at most 2.
+ */
+function withProfileButton(
+  postback: { type: "postback"; title: string; payload: string },
+  profile?: ProfileButton
+) {
+  if (!profile?.username || !profile.title.trim()) return [postback];
+  return [
+    {
+      type: "web_url",
+      url: `https://www.instagram.com/${profile.username.replace(/^@/, "")}/`,
+      title: profile.title.trim().slice(0, 20),
+    },
+    postback,
+  ];
+}
+
 /**
  * Send a private reply to a comment as a button template — an opening message
  * plus a postback button. Tapping the button opens the conversation and fires
@@ -173,7 +199,8 @@ export async function sendPrivateReplyWithButton(
   commentId: string,
   text: string,
   buttonTitle: string,
-  payload: string
+  payload: string,
+  profileButton?: ProfileButton
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
     `${instagramGraphBase()}/${instagramAccountId}/messages`,
@@ -192,9 +219,10 @@ export async function sendPrivateReplyWithButton(
               template_type: "button",
               // Button template text is capped at 640 chars by Meta.
               text: text.slice(0, 640),
-              buttons: [
+              buttons: withProfileButton(
                 { type: "postback", title: buttonTitle.slice(0, 20), payload },
-              ],
+                profileButton
+              ),
             },
           },
         },
@@ -216,7 +244,8 @@ export async function sendDirectMessageWithButton(
   userId: string,
   text: string,
   buttonTitle: string,
-  payload: string
+  payload: string,
+  profileButton?: ProfileButton
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
     `${instagramGraphBase()}/${instagramAccountId}/messages`,
@@ -234,9 +263,10 @@ export async function sendDirectMessageWithButton(
             payload: {
               template_type: "button",
               text: text.slice(0, 640),
-              buttons: [
+              buttons: withProfileButton(
                 { type: "postback", title: buttonTitle.slice(0, 20), payload },
-              ],
+                profileButton
+              ),
             },
           },
         },

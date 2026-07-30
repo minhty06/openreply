@@ -34,6 +34,8 @@ const createAutomationSchema = z
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().max(1000).optional().nullable(),
     followPromptButtonLabel: z.string().max(20).optional().nullable(),
+    followProfileButtonEnabled: z.boolean().optional().default(false),
+    followProfileButtonLabel: z.string().max(20).optional().nullable(),
     followUpEnabled: z.boolean().optional().default(false),
     followUpMessage: z.string().max(1000).optional().nullable(),
     // Minutes to wait before the follow-up. Capped at 24h so it stays inside
@@ -96,6 +98,8 @@ const updateAutomationSchema = z.object({
   requireFollow: z.boolean().optional(),
   followPromptMessage: z.string().max(1000).optional().nullable(),
   followPromptButtonLabel: z.string().max(20).optional().nullable(),
+  followProfileButtonEnabled: z.boolean().optional(),
+  followProfileButtonLabel: z.string().max(20).optional().nullable(),
   followUpEnabled: z.boolean().optional(),
   followUpMessage: z.string().max(1000).optional().nullable(),
   followUpDelayMinutes: z.number().int().min(0).max(1440).optional(),
@@ -408,6 +412,12 @@ export async function POST(request: NextRequest) {
       followPromptButtonLabel: parsed.data.requireFollow
         ? parsed.data.followPromptButtonLabel || null
         : null,
+      followProfileButtonEnabled: parsed.data.requireFollow
+        ? parsed.data.followProfileButtonEnabled
+        : false,
+      followProfileButtonLabel: parsed.data.requireFollow
+        ? parsed.data.followProfileButtonLabel || null
+        : null,
       followUpEnabled: parsed.data.followUpEnabled,
       followUpMessage: parsed.data.followUpEnabled
         ? parsed.data.followUpMessage || null
@@ -510,6 +520,8 @@ export async function PATCH(request: NextRequest) {
   if (automationData.requireFollow === false) {
     automationData.followPromptMessage = null;
     automationData.followPromptButtonLabel = null;
+    automationData.followProfileButtonEnabled = false;
+    automationData.followProfileButtonLabel = null;
   }
   if (automationData.followUpEnabled === false) {
     automationData.followUpMessage = null;

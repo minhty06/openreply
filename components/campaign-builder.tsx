@@ -44,6 +44,8 @@ interface LoadedCampaign {
   requireFollow: boolean;
   followPromptMessage: string | null;
   followPromptButtonLabel: string | null;
+  followProfileButtonEnabled: boolean;
+  followProfileButtonLabel: string | null;
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
@@ -173,6 +175,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [secondaryButtonLabel, setSecondaryButtonLabel] = useState("Open link");
   const [requireFollow, setRequireFollow] = useState(false);
   const [followPromptMessage, setFollowPromptMessage] = useState("");
+  const [followProfileButtonEnabled, setFollowProfileButtonEnabled] =
+    useState(false);
+  const [followProfileButtonLabel, setFollowProfileButtonLabel] =
+    useState("follow me");
   const [followPromptButtonLabel, setFollowPromptButtonLabel] =
     useState("i'm following");
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
@@ -282,6 +288,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setFollowPromptButtonLabel(
           c.followPromptButtonLabel ?? "i'm following"
         );
+        setFollowProfileButtonEnabled(c.followProfileButtonEnabled ?? false);
+        setFollowProfileButtonLabel(c.followProfileButtonLabel ?? "follow me");
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
@@ -417,6 +425,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       secondaryButtonLabel: secondaryButtonLabel.trim() || "Open link",
       requireFollow,
       followPromptMessage: requireFollow ? followPromptMessage.trim() : "",
+      followProfileButtonEnabled: requireFollow && followProfileButtonEnabled,
+      followProfileButtonLabel:
+        requireFollow && followProfileButtonEnabled
+          ? followProfileButtonLabel.trim() || "follow me"
+          : "",
       followPromptButtonLabel: requireFollow
         ? followPromptButtonLabel.trim() || "i'm following"
         : "",
@@ -831,6 +844,30 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   maxLength={20}
                 />
+                <div className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">
+                      also add a button to your profile
+                    </span>
+                    <Toggle
+                      on={followProfileButtonEnabled}
+                      onToggle={() =>
+                        setFollowProfileButtonEnabled(!followProfileButtonEnabled)
+                      }
+                    />
+                  </div>
+                  {followProfileButtonEnabled && (
+                    <input
+                      value={followProfileButtonLabel}
+                      onChange={(e) =>
+                        setFollowProfileButtonLabel(e.target.value)
+                      }
+                      placeholder="follow me"
+                      className="mt-3 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                      maxLength={20}
+                    />
+                  )}
+                </div>
                 <p className="text-xs text-muted">
                   We send the link only after they tap the button and Instagram
                   confirms the follow. If it can&apos;t be verified, we send it
@@ -986,6 +1023,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             requireFollow={requireFollow}
             followPromptMessage={followPromptMessage}
             followPromptButtonLabel={followPromptButtonLabel || "i'm following"}
+            followProfileButtonLabel={
+              followProfileButtonEnabled
+                ? followProfileButtonLabel || "follow me"
+                : null
+            }
             followUpEnabled={followUpEnabled}
             followUpMessage={followUpMessage}
             followUpDelayMinutes={followUpDelayMinutes}

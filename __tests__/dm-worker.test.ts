@@ -576,10 +576,52 @@ describe("DM Worker — Full Pipeline", () => {
       "comment_555",
       "Follow me first commenter_user, then tap 👇",
       "I'm following ✅",
-      "followcheck:auto_789"
+      "followcheck:auto_789",
+      // No profile button configured, so the prompt carries only the postback.
+      undefined
     );
     expect(mockSendPrivateReplyWithLinkButton).not.toHaveBeenCalled();
     expect(mockSendPrivateReply).not.toHaveBeenCalled();
+  });
+
+  it("should attach a profile button to the follow prompt when enabled", async () => {
+    mockGetUserFollowStatus.mockResolvedValue(false);
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...mockAutomation,
+        requireFollow: true,
+        followPromptMessage: "Follow me first {username}, then tap 👇",
+        followPromptButtonLabel: "I'm following ✅",
+        followProfileButtonEnabled: true,
+        followProfileButtonLabel: "follow me",
+        instagramAccount: {
+          ...mockAutomation.instagramAccount,
+          username: "testaccount",
+        },
+        trackedLinks: [
+          {
+            slug: "abc123",
+            label: "Primary campaign link",
+            destinationUrl: "https://example.com",
+          },
+        ],
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    // The profile button is derived from the connected account's username, so
+    // it stays correct if the handle changes without editing the campaign.
+    expect(mockSendPrivateReplyWithButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "comment_555",
+      "Follow me first commenter_user, then tap 👇",
+      "I'm following ✅",
+      "followcheck:auto_789",
+      { username: "testaccount", title: "follow me" }
+    );
   });
 
   it("should skip the prompt and send the link when the commenter already follows", async () => {

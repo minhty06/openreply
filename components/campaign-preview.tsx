@@ -34,6 +34,7 @@ interface CampaignPreviewProps {
   requireFollow: boolean;
   followPromptMessage: string;
   followPromptButtonLabel: string;
+  followProfileButtonLabel?: string | null;
   followUpEnabled: boolean;
   followUpMessage: string;
   followUpDelayMinutes?: number;
@@ -314,6 +315,7 @@ function DmScreen({
   requireFollow,
   followPromptMessage,
   followPromptButtonLabel,
+  followProfileButtonLabel,
   followUpEnabled,
   followUpMessage,
   followUpDelayMinutes = 0,
@@ -333,6 +335,7 @@ function DmScreen({
   requireFollow: boolean;
   followPromptMessage: string;
   followPromptButtonLabel: string;
+  followProfileButtonLabel?: string | null;
   followUpEnabled: boolean;
   followUpMessage: string;
   followUpDelayMinutes?: number;
@@ -378,6 +381,11 @@ function DmScreen({
                   {followPromptMessage ||
                     "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over"}
                 </p>
+                {followProfileButtonLabel && (
+                  <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
+                    {followProfileButtonLabel}
+                  </div>
+                )}
                 <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
                   {followPromptButtonLabel || "i'm following"}
                 </div>
@@ -502,6 +510,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             requireFollow={props.requireFollow}
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
+            followProfileButtonLabel={props.followProfileButtonLabel}
             followUpEnabled={props.followUpEnabled}
             followUpMessage={props.followUpMessage}
             followUpDelayMinutes={props.followUpDelayMinutes}

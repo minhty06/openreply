@@ -22,6 +22,7 @@ import {
   sendPrivateReply,
   sendPrivateReplyWithButton,
   sendPrivateReplyWithLinkButton,
+  type ProfileButton,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
@@ -87,6 +88,24 @@ function buildLinkButtons(
     url: buildTrackedUrl(link.slug),
     title: (index === 0 ? primaryLabel : link.label) || link.label || "Open link",
   }));
+}
+
+/**
+ * The optional profile-link button shown alongside "i'm following" on the
+ * follow prompt. Derived from the connected account's current username, so a
+ * handle change is picked up without editing the campaign.
+ */
+function profileButtonFor(automation: {
+  followProfileButtonEnabled: boolean;
+  followProfileButtonLabel: string | null;
+  instagramAccount: { username: string };
+}): ProfileButton | undefined {
+  if (!automation.followProfileButtonEnabled) return undefined;
+  if (!automation.instagramAccount.username) return undefined;
+  return {
+    username: automation.instagramAccount.username,
+    title: automation.followProfileButtonLabel || "follow me",
+  };
 }
 
 /**
@@ -489,7 +508,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commentId,
           promptText,
           automation.followPromptButtonLabel || "i'm following",
-          `followcheck:${automation.id}`
+          `followcheck:${automation.id}`,
+          profileButtonFor(automation)
         );
       } else if (automation.trackedLinks.length > 0) {
         // Try button template first; if Meta rejects it, fall back to inline links.
@@ -679,7 +699,8 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
           userId,
           promptText,
           automation.followPromptButtonLabel || "i'm following",
-          `followcheck:${automation.id}`
+          `followcheck:${automation.id}`,
+          profileButtonFor(automation)
         );
       } catch (error) {
         console.log(

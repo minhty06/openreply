@@ -186,6 +186,12 @@ model Automation {
   requireFollow           Boolean @default(false)
   followPromptMessage     String?
   followPromptButtonLabel String?
+  // Optional second button on the follow prompt: a web_url straight to the
+  // connected account's profile, so a commenter can follow without leaving the
+  // DM to search for it. The URL is derived from the account username at send
+  // time rather than stored, so it cannot go stale if the handle changes.
+  followProfileButtonEnabled Boolean @default(false)
+  followProfileButtonLabel   String?
   followUpEnabled Boolean @default(false)
   followUpMessage String?
   // Minutes to wait after the link is delivered before sending the follow-up.
