@@ -1,0 +1,30 @@
+[Unit]
+Description=OpenReply DM worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/openreply
+# Secrets live outside the repo so a git operation can never commit them.
+EnvironmentFile=/etc/openreply/worker.env
+ExecStart=/usr/bin/npm run worker
+# The queue consumer must come back on its own after a crash, an OOM kill, or a
+# host reboot — that is the whole reason for moving off a laptop.
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openreply-worker
+
+# The worker only makes outbound connections, so it needs no privileges and no
+# write access outside its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/openreply
+
+[Install]
+WantedBy=multi-user.target
