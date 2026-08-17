@@ -3,6 +3,10 @@
 # Provision an always-on OpenReply DM worker on a fresh Ubuntu VM
 # (written for an Oracle Cloud "Always Free" instance, but any Ubuntu box works).
 #
+# This sets up the WORKER ONLY, against a database and Redis you host elsewhere.
+# To run the whole stack — web app, worker, Postgres and Redis — on this one box,
+# run this script first and then deploy/oracle-box-setup.sh.
+#
 # Run as the default `ubuntu` user:
 #   curl -fsSL <raw-url-of-this-file> -o setup.sh && bash setup.sh
 # or copy it over and: bash setup.sh

@@ -1,7 +1,10 @@
 [Unit]
 Description=OpenReply DM worker
-After=network-online.target
+# Postgres and Redis run on this host now, so the worker must not start before
+# them — its first act is to connect to both.
+After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
+Requires=postgresql.service redis-server.service
 
 [Service]
 Type=simple
@@ -9,6 +12,9 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/openreply
 # Secrets live outside the repo so a git operation can never commit them.
 EnvironmentFile=/etc/openreply/worker.env
+# Heap cap so a long-running worker cannot grow into the memory Postgres and the
+# web app need on this 1 GB host. See the budget in openreply-web.service.
+Environment=NODE_OPTIONS=--max-old-space-size=192
 ExecStart=/usr/bin/npm run worker
 # The queue consumer must come back on its own after a crash, an OOM kill, or a
 # host reboot — that is the whole reason for moving off a laptop.

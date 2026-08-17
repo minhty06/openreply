@@ -39,17 +39,29 @@ decrypts it to send. Different keys mean every send fails to decrypt.
 
 ## Reference free deployment
 
-The zero-cost stack this instance runs on. Alternatives (e.g. Railway for the
-worker + Postgres + Redis) are covered in [setup.md](setup.md).
+The zero-cost stack this instance runs on: one Oracle Cloud "Always Free" VM
+(VM.Standard.E2.1.Micro, 1 GB, Ubuntu) running all four processes, with systemd
+keeping them up. Alternatives — Vercel for the web app, Railway or Neon for the
+datastores — are covered in [setup.md](setup.md).
 
 | Piece | Service | Free tier |
 | --- | --- | --- |
-| Web app | Vercel (Hobby) | Free |
-| PostgreSQL | Neon | Free (~0.5 GB) |
-| Redis | Redis Cloud (Essentials) | Free (30 MB, TCP) |
-| Worker (24/7) | Oracle Cloud "Always Free" VM (VM.Standard.E2.1.Micro, Ubuntu 22.04, kept alive with `pm2`) | Free forever |
+| Web app, worker, PostgreSQL, Redis | Oracle Cloud "Always Free" VM | Free forever |
+| TLS + reverse proxy | Caddy on the same box (Let's Encrypt) | Free |
 | Login email | Resend | Free (3k emails/mo) |
 | Instagram API | Meta app with Instagram Login | Free |
+
+Two consequences of the single box worth knowing:
+
+- **The web app is built in CI, not on the box.** 1 GB is not enough for
+  `next build`. `.github/workflows/release.yml` publishes a Next.js standalone
+  bundle as a release asset and `deploy/pull-release.sh` installs it.
+- **Memory is the binding constraint.** Measured on the box: the OS plus the
+  worker already occupy ~411M of 956M usable. Postgres (~90M), Redis (~25M), the
+  web app (~150M) and Caddy (~20M) bring it to roughly 700M, with a 2 GB
+  swapfile as the cushion. The heap caps in the systemd units and the Postgres
+  tuning in `deploy/oracle-box-setup.sh` are what keep that budget honest, and
+  `journalctl -k | grep -i oom` is the first place to look if something dies.
 
 ## Environment variables
 

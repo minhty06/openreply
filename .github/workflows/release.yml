@@ -1,0 +1,127 @@
+name: Release web build
+
+# The worker host is a 1 GB Oracle Always Free instance, which cannot run
+# `next build` (it needs ~2 GB and OOMs). So the web app is built here and
+# shipped to the box as a prebuilt Next.js standalone bundle, which the box runs
+# directly with `node server.js` — no `npm ci`, no build step, on the box.
+#
+# Every run refreshes the rolling `web-latest` release, which is what
+# deploy/pull-release.sh pulls by default. Pushing a `v*` tag additionally
+# publishes an immutable asset under that tag, so a rollback is a pinned pull.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-web
+  cancel-in-progress: false
+
+env:
+  ARTIFACT: openreply-web.tar.gz
+
+jobs:
+  build:
+    name: Build and publish standalone bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Matches NODE_MAJOR in deploy/oracle-worker-setup.sh, so the bundle is
+          # built on the same major version that runs it.
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/instrareply
+
+      # A broken release is worse than a slow one, and the suite takes under a
+      # second. These are the same checks CI runs on main.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/instrareply
+          REDIS_URL: redis://localhost:6379
+          NEXTAUTH_URL: http://localhost:3000
+          NEXTAUTH_SECRET: test-secret-for-ci-build
+          CRON_SECRET: test-secret-for-ci-cron
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          RESEND_API_KEY: re_test
+          EMAIL_FROM: "InstaReply <login@example.com>"
+          META_GRAPH_API_VERSION: v25.0
+          INSTAGRAM_APP_ID: test
+          INSTAGRAM_APP_SECRET: test
+          FACEBOOK_APP_SECRET: test
+          WEBHOOK_VERIFY_TOKEN: test
+
+      # `output: "standalone"` deliberately omits these two, on the assumption a
+      # CDN serves them. There is no CDN here — Caddy proxies everything to the
+      # Node server — so they have to be copied in or every asset 404s.
+      - name: Copy static assets into the bundle
+        run: |
+          cp -r public .next/standalone/
+          cp -r .next/static .next/standalone/.next/
+
+      # Next's file tracing copies a repo-root .env into the bundle if one
+      # exists. CI has none (it is gitignored), but a leaked .env in a public
+      # release asset would publish every production secret, so this is belt and
+      # braces rather than a nicety. Verified locally: the tracer really does
+      # copy it.
+      - name: Strip any traced env files
+        run: |
+          find .next/standalone -maxdepth 1 -name '.env*' -print -delete
+          ! test -e .next/standalone/.env
+
+      - name: Record build provenance
+        run: |
+          cat > .next/standalone/BUILD_INFO <<EOF
+          commit=${{ github.sha }}
+          ref=${{ github.ref_name }}
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+
+      - name: Create tarball
+        run: |
+          tar --exclude='./.env*' -czf "$ARTIFACT" -C .next/standalone .
+          ls -lh "$ARTIFACT"
+
+      - name: Publish to the rolling web-latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view web-latest >/dev/null 2>&1 || \
+            gh release create web-latest \
+              --prerelease \
+              --title "Latest web build" \
+              --notes "Rolling Next.js standalone bundle. Deployed with deploy/pull-release.sh. Replaced on every release run."
+          gh release upload web-latest "$ARTIFACT" --clobber
+
+      - name: Publish the tagged asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || \
+            gh release create "${{ github.ref_name }}" --generate-notes
+          gh release upload "${{ github.ref_name }}" "$ARTIFACT" --clobber

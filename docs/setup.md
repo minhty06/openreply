@@ -26,12 +26,34 @@ The web app and the worker must share the same `DATABASE_URL`, the same `REDIS_U
 
 You do not need to buy a domain. Deploying the web app to Vercel gives you a free public URL like `your-app.vercel.app`, and that URL is what everything else points at: `NEXTAUTH_URL`, the Meta OAuth redirect, and the Meta webhook callback all use it. If you want a custom domain later you can add one, but it is optional and you can launch without it.
 
-Recommended split:
+There are two supported shapes. Pick one:
 
-- Web app: Vercel. You get `your-app.vercel.app` for free on deploy.
-- Worker, Postgres, Redis: Railway.
+- **Managed split (Steps 1–3 below):** web app on Vercel, worker plus Postgres and Redis on Railway. Fastest to stand up, and the right choice if you would rather not run a server.
+- **[Single box](#single-box-deployment):** everything on one always-on VM. No vendor free-tier ceilings, no managed backups either.
 
 Do Railway first, because Vercel needs the database URLs from it.
+
+## Single-box deployment
+
+Everything — web app, worker, Postgres, Redis — on one always-on Ubuntu VM, hosted for free on an Oracle Cloud "Always Free" instance. This is what the reference instance runs, and it exists because managed free tiers meter things a 24/7 webhook consumer cannot avoid spending: Neon's free plan allows 100 CU-hours/month, and a compute that never scales to zero burns ~180.
+
+The scripts in [`deploy/`](../deploy) do the work:
+
+```bash
+git clone https://github.com/<you>/openreply.git ~/openreply
+bash ~/openreply/deploy/oracle-worker-setup.sh   # Node, repo, worker unit
+bash ~/openreply/deploy/oracle-box-setup.sh      # Postgres, Redis, Caddy, web, cron
+```
+
+Then follow the checklist the second script prints. What is worth knowing before you start:
+
+- **The web app is built off-box.** A 1 GB instance cannot run `next build` (it needs ~2 GB and gets OOM-killed). [`.github/workflows/release.yml`](../.github/workflows/release.yml) builds a Next.js standalone bundle in CI and publishes it as a release asset; [`deploy/pull-release.sh`](../deploy/pull-release.sh) installs it on the box and rolls back automatically if the new release fails to answer. Deploying is `deploy/pull-release.sh`, not `git pull && npm run build`.
+- **You need a domain.** Meta requires HTTPS on a real hostname for the webhook callback, and there is no free `*.vercel.app` to borrow. Point an A record at the instance's public IP; Caddy obtains and renews the certificate itself.
+- **Open 80 and 443 twice.** Once in the OCI console's security list for the subnet, and once in the host's iptables — Oracle's Ubuntu images drop everything except 22 even when the security list allows it. `oracle-box-setup.sh` does the host half; the console half is manual.
+- **The crons move with you.** The three jobs in `vercel.json` stop running the moment DNS leaves Vercel. [`deploy/openreply.crontab`](../deploy/openreply.crontab) replaces them and adds the retention purge. Losing the token refresh eventually breaks every send, and losing the follower snapshot loses that day of history permanently.
+- **Backups are yours now.** [`deploy/backup-openreply.sh`](../deploy/backup-openreply.sh) writes a nightly full dump plus a small dump of the tables that cannot be reconstructed from anywhere else, and keeps 14 nights. Pull them off the box periodically — a backup that only exists on the instance does not survive losing the instance.
+
+Migrating an existing deployment onto a box: export the old database, apply the schema with `npm run db:migrate`, then load the data with [`deploy/restore-neon-export.sh`](../deploy/restore-neon-export.sh), which loads per-table SQL files in foreign-key order inside a single transaction. Cut over by repointing DNS — if you already use a custom domain, nothing in the Meta app configuration needs to change, and tracked links in DMs you have already sent keep working.
 
 ### Step 1: Railway (Postgres, Redis, worker)
 

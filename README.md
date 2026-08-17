@@ -88,7 +88,7 @@ If you use Claude Code, Cursor, or a similar tool, the Meta setup is a lot faste
 - Tailwind CSS for the interface
 - The official Instagram API with Instagram Login
 
-For the complete stack — application libraries, the two runtime processes, and the free services this runs on (Vercel, Neon, Redis Cloud, an Oracle Cloud always-free VM for the worker, Resend, Meta) — see [docs/stack.md](docs/stack.md).
+For the complete stack — application libraries, the two runtime processes, and the free services this runs on (a single Oracle Cloud always-free VM running the app, worker, Postgres and Redis, plus Resend and Meta) — see [docs/stack.md](docs/stack.md).
 
 ## Contributing
 
