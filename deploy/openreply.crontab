@@ -1,0 +1,35 @@
+# OpenReply scheduled jobs. Install to /etc/cron.d/openreply (mode 0644, root).
+#
+# Replaces the three Vercel crons in vercel.json, which stop running the moment
+# DNS points at this box, plus the new retention purge.
+#
+# Times are UTC — the host timezone is set to UTC during provisioning. They are
+# spread an hour apart on purpose: on a 1 GB box with 1/8 OCPU, two of these
+# running at once is a real memory and CPU spike.
+#
+# Output goes to root's mail / the journal. Each job exits non-zero on an HTTP
+# error (curl --fail), so a silent failure is not possible.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# m  h  dom mon dow  user  command
+
+# Nightly database dumps, before the purge runs so a backup always predates it.
+30  3  *   *   *    root  /home/ubuntu/openreply/deploy/backup-openreply.sh
+
+# Delete records past their retention window (lib/ops/retention.ts).
+20  4  *   *   *    root  /home/ubuntu/openreply/deploy/run-cron-job.sh purge-retention
+
+# Refresh Instagram long-lived tokens nearing expiry. This one is the lifeline:
+# if it stops running, the token eventually expires and every send fails.
+20  5  *   *   *    root  /home/ubuntu/openreply/deploy/run-cron-job.sh refresh-tokens
+
+# Bind "next reel" campaigns to a newly published reel. Vercel's free plan capped
+# this at once a day; nothing stops it running hourly here if you want campaigns
+# to go live faster.
+20  6  *   *   *    root  /home/ubuntu/openreply/deploy/run-cron-job.sh attach-next-reel
+
+# Record one follower total per account per day. Instagram retains only ~30 days
+# of insights, so a missed run loses that day permanently.
+20  7  *   *   *    root  /home/ubuntu/openreply/deploy/run-cron-job.sh snapshot-followers

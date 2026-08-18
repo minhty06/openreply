@@ -1,0 +1,29 @@
+# Caddy config for the OpenReply box. Install to /etc/caddy/Caddyfile.
+#
+# Caddy obtains and renews the Let's Encrypt certificate for this domain on its
+# own; there is no certbot cron to forget about. Ports 80 and 443 must be open
+# in BOTH the OCI security list and the host's iptables — Oracle's Ubuntu images
+# drop everything except 22 even when the security list allows it, which is the
+# most common reason a fresh box appears to hang instead of serving.
+
+{
+	# Uncomment and set a real address to get expiry warnings from Let's Encrypt.
+	# email admin@nomadminh.com
+}
+
+dm.nomadminh.com {
+	encode zstd gzip
+
+	# Everything goes to the Next.js standalone server on loopback. Note there is
+	# deliberately no redirect or rewrite here: Meta does not reliably follow
+	# redirects on webhook POSTs, so /api/webhook must be served directly on the
+	# primary hostname.
+	reverse_proxy 127.0.0.1:3000
+
+	log {
+		output file /var/log/caddy/openreply.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+	}
+}

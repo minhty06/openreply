@@ -1,0 +1,43 @@
+[Unit]
+Description=OpenReply web app
+# Postgres and Redis are local now, so the web app must not start before them —
+# on a 1 GB box a boot-time connection storm against a cold Postgres is the
+# difference between a clean start and a restart loop.
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+# A symlink to the current release under /home/ubuntu/openreply-web/releases,
+# repointed by deploy/pull-release.sh. Restarting picks up the new target.
+WorkingDirectory=/home/ubuntu/openreply-web/current
+# Secrets live outside the repo so a git operation can never commit them.
+EnvironmentFile=/etc/openreply/web.env
+Environment=NODE_ENV=production
+# Caddy terminates TLS and proxies here, so the app itself binds loopback only
+# and is never directly reachable from the internet. Next's standalone server
+# reads both of these (see its output docs).
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+# Heap cap so the web app cannot grow into the memory the worker and Postgres
+# need. Measured on this 1 GB host: OS plus worker already sit at ~411M, leaving
+# roughly 300M for Postgres (~90M), Redis (~25M), this (~150M) and Caddy (~20M).
+ExecStart=/usr/bin/node --max-old-space-size=256 server.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openreply-web
+
+# The app only makes outbound connections and serves loopback, so it needs no
+# privileges and no write access outside its own release directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/openreply-web
+
+[Install]
+WantedBy=multi-user.target
