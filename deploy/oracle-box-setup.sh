@@ -116,6 +116,11 @@ PGEOF
 sudo systemctl restart postgresql
 sudo systemctl enable -q postgresql
 
+# The postgres user cannot read /home/ubuntu, and runuser keeps the caller's
+# working directory, so every psql call would print a "could not change
+# directory" warning. Harmless, but it buries real errors in the log.
+cd /
+
 log "Creating the $DB_NAME database"
 if ! sudo runuser -u postgres -- psql -tAc \
   "select 1 from pg_roles where rolname='$DB_USER'" | grep -q 1; then
@@ -146,7 +151,10 @@ fi
 # ----------------------------------------------------------------- redis ------
 log "Configuring Redis"
 sudo tee /etc/redis/openreply.conf >/dev/null <<'REDISEOF'
-bind 127.0.0.1 -::1
+# Plain "127.0.0.1" rather than "127.0.0.1 -::1": the optional-address dash
+# prefix is Redis 6.2+, and Ubuntu 22.04 ships 6.0, where it is a parse error
+# that stops the server from starting at all.
+bind 127.0.0.1
 maxmemory 64mb
 # noeviction is mandatory, not a preference: this Redis holds the BullMQ send
 # queue, and evicting a key under memory pressure would silently drop queued
@@ -154,11 +162,18 @@ maxmemory 64mb
 maxmemory-policy noeviction
 REDISEOF
 # Redis has no conf.d; later directives win, so the include goes at the end.
-if ! grep -q '^include /etc/redis/openreply.conf' /etc/redis/redis.conf; then
+# The grep needs sudo — redis.conf is 0640 root:redis, and an unprivileged grep
+# fails with "Permission denied", which reads as "not present" and appends a
+# duplicate include on every run.
+if ! sudo grep -q '^include /etc/redis/openreply.conf' /etc/redis/redis.conf; then
   echo 'include /etc/redis/openreply.conf' | sudo tee -a /etc/redis/redis.conf >/dev/null
 fi
 sudo systemctl restart redis-server
 sudo systemctl enable -q redis-server
+redis-cli ping >/dev/null 2>&1 && note "redis responding" || {
+  echo "Redis did not come up; check: journalctl -xeu redis-server" >&2
+  exit 1
+}
 
 # ------------------------------------------------------------- web layout -----
 log "Preparing the web release layout"
