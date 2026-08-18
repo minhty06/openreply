@@ -233,6 +233,11 @@ sudo systemctl daemon-reload
 #     AFTER the DNS change so its first attempt is the one that succeeds.
 sudo systemctl enable -q openreply-web
 sudo systemctl enable -q caddy
+# The Debian package starts Caddy on install, before this script has written its
+# Caddyfile. Stop it explicitly: leaving it running would have it pick up this
+# config on any later reload and start failing ACME challenges against a domain
+# that still resolves elsewhere.
+sudo systemctl stop caddy 2>/dev/null || true
 
 # The cron jobs are installed disabled: cron.d ignores filenames containing a
 # dot. Before cutover they would run against the newly restored local database
