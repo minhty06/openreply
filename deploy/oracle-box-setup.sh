@@ -232,7 +232,11 @@ sudo systemctl daemon-reload
 #     validations count against a rate limit we need at cutover. Start Caddy
 #     AFTER the DNS change so its first attempt is the one that succeeds.
 sudo systemctl enable -q openreply-web
-sudo systemctl enable -q caddy
+# Caddy is deliberately NOT enabled here. `enable` also means "start on boot",
+# so a reboot before cutover would bring it up against a domain whose DNS still
+# points elsewhere, failing ACME challenges and spending the Let's Encrypt
+# failed-validation budget we need working at cutover. Step (c) below enables
+# and starts it in one go, once DNS is correct.
 # The Debian package starts Caddy on install, before this script has written its
 # Caddyfile. Stop it explicitly: leaving it running would have it pick up this
 # config on any later reload and start failing ACME challenges against a domain
@@ -294,7 +298,7 @@ Remaining, in order:
   6. Cut over, in this order:
        a. paste the values from $ENV_DIR/db-credentials.txt into both env files
        b. point the DNS A record for $DOMAIN at this box and let the TTL lapse
-       c. sudo systemctl start caddy          # first ACME attempt now succeeds
+       c. sudo systemctl enable --now caddy   # first ACME attempt now succeeds
        d. sudo systemctl restart openreply-web openreply-worker
        e. sudo mv /etc/cron.d/openreply.disabled /etc/cron.d/openreply
 ────────────────────────────────────────────────────────────────────────
