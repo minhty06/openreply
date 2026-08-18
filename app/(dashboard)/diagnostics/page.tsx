@@ -197,7 +197,7 @@ export default function DiagnosticsPage() {
       </Section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Campaign DM Failures And Skips">
+        <Section title="Campaign DM Failures And Skips (last 30 days)">
           {data?.dmFailures.length ? (
             <div className="space-y-3">
               {data.dmFailures.map((item) => (
@@ -222,7 +222,7 @@ export default function DiagnosticsPage() {
           )}
         </Section>
 
-        <Section title="Webhook Failures">
+        <Section title="Webhook Failures (last 30 days)">
           {data?.webhookFailures.length ? (
             <div className="space-y-3">
               {data.webhookFailures.map((event) => (
@@ -246,7 +246,7 @@ export default function DiagnosticsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Token Refresh Failures">
+        <Section title="Token Refresh Failures (last 30 days)">
           {data?.tokenRefreshFailures.length ? (
             <div className="space-y-3">
               {data.tokenRefreshFailures.map((event) => (
