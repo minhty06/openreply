@@ -69,8 +69,14 @@ sudo runuser -u postgres -- psql -q -d "$DB_NAME" -v ON_ERROR_STOP=1 \
 log "Copying data"
 # --disable-triggers so foreign keys do not constrain the load order, which
 # data-only dumps do not guarantee.
+# transaction_timeout is a PostgreSQL 17+ setting that pg_dump 18 always emits in
+# its header. Restoring into an older server aborts on it with "unrecognized
+# configuration parameter" — after the truncate has already run, which empties
+# the database. Strip that one parameter rather than all SET lines, which also
+# carry client_encoding and search_path.
 "$PG_DUMP" --data-only --no-owner --no-privileges --disable-triggers \
   --exclude-table="$EXCLUDE" "$SOURCE_URL" \
+  | grep -v '^SET transaction_timeout' \
   | sudo runuser -u postgres -- psql -q -d "$DB_NAME" -v ON_ERROR_STOP=1
 
 log "Comparing row counts"
