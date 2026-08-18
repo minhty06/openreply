@@ -22,6 +22,12 @@
 
 set -euo pipefail
 
+# apt has no controlling tty here, and on 1/8 OCPU the package unpacking is slow
+# enough that an interactive SSH session can drop mid-install. Run this detached
+# so a lost connection cannot take the provisioning with it:
+#   setsid nohup bash deploy/oracle-box-setup.sh > /tmp/provision.log 2>&1 &
+export DEBIAN_FRONTEND=noninteractive
+
 APP_DIR="/home/ubuntu/openreply"
 WEB_DIR="/home/ubuntu/openreply-web"
 ENV_DIR="/etc/openreply"
