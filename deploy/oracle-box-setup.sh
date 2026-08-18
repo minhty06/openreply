@@ -202,11 +202,24 @@ sudo install -m 0644 -o root -g root \
 sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
 chmod +x "$APP_DIR"/deploy/*.sh
 sudo systemctl daemon-reload
-# Enabled but NOT started: the web app has no release yet, and starting the
-# worker here would be a cutover, which is a separate deliberate step.
+# Enabled but NOT started, all three of them:
+#   - the web app has no release yet;
+#   - starting the worker here would be a cutover, which is a separate step;
+#   - Caddy would immediately try to get a certificate for a domain whose DNS
+#     still points somewhere else. Let's Encrypt would send the HTTP-01
+#     challenge to the old host, every attempt would fail, and the failed
+#     validations count against a rate limit we need at cutover. Start Caddy
+#     AFTER the DNS change so its first attempt is the one that succeeds.
 sudo systemctl enable -q openreply-web
-sudo systemctl reload caddy 2>/dev/null || sudo systemctl restart caddy
 sudo systemctl enable -q caddy
+
+# The cron jobs are installed disabled: cron.d ignores filenames containing a
+# dot. Before cutover they would run against the newly restored local database
+# while production still runs elsewhere — refresh-tokens in particular would
+# rotate the Instagram token into a database nothing is serving from yet.
+if [ -f /etc/cron.d/openreply ]; then
+  sudo mv /etc/cron.d/openreply /etc/cron.d/openreply.disabled
+fi
 
 # -------------------------------------------------------------- firewall ------
 log "Opening 80/443 in the host firewall"
@@ -252,8 +265,11 @@ Remaining, in order:
   5. Verify before touching DNS:
        curl -sS -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3000/terms
 
-  6. Cut over: paste the values from $ENV_DIR/db-credentials.txt into both
-     env files, point DNS at this box, then
-       sudo systemctl restart openreply-web openreply-worker
+  6. Cut over, in this order:
+       a. paste the values from $ENV_DIR/db-credentials.txt into both env files
+       b. point the DNS A record for $DOMAIN at this box and let the TTL lapse
+       c. sudo systemctl start caddy          # first ACME attempt now succeeds
+       d. sudo systemctl restart openreply-web openreply-worker
+       e. sudo mv /etc/cron.d/openreply.disabled /etc/cron.d/openreply
 ────────────────────────────────────────────────────────────────────────
 EOF
