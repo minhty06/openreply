@@ -43,6 +43,11 @@ mkdir -p "$DEST"
 # The dumps contain encrypted access tokens and user email addresses.
 chmod 700 "$DEST"
 
+# runuser keeps the caller's working directory and the postgres user cannot read
+# /home/ubuntu, so every pg_dump would print a "could not change directory"
+# warning to stderr — noise that hides a real failure in cron mail.
+cd /
+
 dump() {
   local out="$1"
   shift
