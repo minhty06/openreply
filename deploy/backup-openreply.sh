@@ -41,6 +41,7 @@ CRITICAL_TABLES=(TrackedLink Automation FollowerSnapshot InstagramAccount)
 
 mkdir -p "$DEST"
 # The dumps contain encrypted access tokens and user email addresses.
+chown ubuntu:ubuntu "$DEST"
 chmod 700 "$DEST"
 
 # runuser keeps the caller's working directory and the postgres user cannot read
@@ -70,6 +71,10 @@ dump() {
   fi
 
   mv "$tmp" "$out"
+  # Owned by ubuntu, not root: these are pulled off the box with rsync as that
+  # user, and root-owned 0600 files fail with "Permission denied". Still
+  # unreadable to anyone else — they hold encrypted tokens and email addresses.
+  chown ubuntu:ubuntu "$out"
   chmod 600 "$out"
 }
 

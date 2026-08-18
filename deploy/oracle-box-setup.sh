@@ -76,7 +76,20 @@ free -h | sed 's/^/    /'
 # -------------------------------------------------------------- packages ------
 log "Installing Postgres and Redis"
 sudo apt-get update -qq
-sudo apt-get install -y -qq postgresql redis-server curl ca-certificates gnupg
+sudo apt-get install -y -qq postgresql curl ca-certificates gnupg
+
+# Redis from the official repo, not the distro. Ubuntu 22.04 ships 6.0.16 and
+# BullMQ — which is the queue that actually delivers the DMs — warns that it
+# wants 6.2.0 as a minimum.
+if ! command -v redis-server >/dev/null 2>&1; then
+  curl -fsSL https://packages.redis.io/gpg \
+    | sudo gpg --dearmor --yes -o /usr/share/keyrings/redis-archive-keyring.gpg
+  sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb jammy main" \
+    | sudo tee /etc/apt/sources.list.d/redis.list >/dev/null
+  sudo apt-get update -qq
+fi
+sudo apt-get install -y -qq redis-server
 
 PG_VERSION="$(ls /etc/postgresql | sort -V | tail -1)"
 PG_CONF_DIR="/etc/postgresql/$PG_VERSION/main"
@@ -160,6 +173,12 @@ maxmemory 64mb
 # queue, and evicting a key under memory pressure would silently drop queued
 # DMs. Better to fail a write loudly than to lose a send.
 maxmemory-policy noeviction
+# The official Redis package ships a Type=notify unit, which needs the server to
+# signal readiness. Without this, redis starts and is then killed by systemd
+# with result 'protocol' — and because both app units declare
+# Requires=redis-server, they go down with it.
+supervised systemd
+daemonize no
 REDISEOF
 # Redis has no conf.d; later directives win, so the include goes at the end.
 # The grep needs sudo — redis.conf is 0640 root:redis, and an unprivileged grep
