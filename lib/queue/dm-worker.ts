@@ -48,6 +48,7 @@ import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import {
   DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL,
   DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
+  FOLLOW_PROMPT_PRESET,
 } from "@/lib/campaigns/defaults";
 
 import {
@@ -646,8 +647,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       } else if (sendFollowPrompt) {
         const promptText = renderMessageWithoutLink({
           message:
-            automation.followPromptMessage ||
-            "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+            automation.followPromptMessage || FOLLOW_PROMPT_PRESET,
           commenterName,
         });
         await sendPrivateReplyWithButton({
@@ -916,8 +916,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       if (fallback) return;
       const promptText = renderMessageWithoutLink({
         message:
-          automation.followPromptMessage ||
-          "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+          automation.followPromptMessage || FOLLOW_PROMPT_PRESET,
         commenterName,
       });
       try {
@@ -1305,8 +1304,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       if (sendFollowPrompt) {
         const promptText = renderMessageWithoutLink({
           message:
-            automation.followPromptMessage ||
-            "Almost there! Follow me and tap the button below to grab your link 💛",
+            automation.followPromptMessage || FOLLOW_PROMPT_PRESET,
           commenterName,
         });
         await sendDirectMessageWithButton({
