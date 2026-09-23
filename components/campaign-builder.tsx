@@ -13,6 +13,11 @@
  */
 
 import { useI18n } from "@/lib/i18n/provider";
+import {
+  DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL,
+  DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
+  DEFAULT_LINK_BUTTON_LABEL,
+} from "@/lib/campaigns/defaults";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
@@ -173,18 +178,24 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [dmMessage, setDmMessage] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
   const [trackedDestinationUrl, setTrackedDestinationUrl] = useState("");
-  const [linkButtonLabel, setLinkButtonLabel] = useState("Open link");
+  const [linkButtonLabel, setLinkButtonLabel] = useState(
+    DEFAULT_LINK_BUTTON_LABEL
+  );
   const [secondLinkOpen, setSecondLinkOpen] = useState(false);
   const [secondaryDestinationUrl, setSecondaryDestinationUrl] = useState("");
-  const [secondaryButtonLabel, setSecondaryButtonLabel] = useState("Open link");
+  const [secondaryButtonLabel, setSecondaryButtonLabel] = useState(
+    DEFAULT_LINK_BUTTON_LABEL
+  );
   const [requireFollow, setRequireFollow] = useState(false);
   const [followPromptMessage, setFollowPromptMessage] = useState("");
   const [followProfileButtonEnabled, setFollowProfileButtonEnabled] =
     useState(false);
-  const [followProfileButtonLabel, setFollowProfileButtonLabel] =
-    useState("follow me");
-  const [followPromptButtonLabel, setFollowPromptButtonLabel] =
-    useState("i'm following");
+  const [followProfileButtonLabel, setFollowProfileButtonLabel] = useState(
+    DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL
+  );
+  const [followPromptButtonLabel, setFollowPromptButtonLabel] = useState(
+    DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL
+  );
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
@@ -279,22 +290,26 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setOpeningDmMessage(c.openingDmMessage ?? "");
         setOpeningDmButtonLabel(c.openingDmButtonLabel ?? "");
         setDmMessage(c.dmMessage);
-        setLinkButtonLabel(c.linkButtonLabel ?? "Open link");
+        setLinkButtonLabel(c.linkButtonLabel ?? DEFAULT_LINK_BUTTON_LABEL);
         setIsActive(c.isActive);
         const link = c.trackedLinks?.[0]?.destinationUrl ?? "";
         setTrackedDestinationUrl(link);
         setLinkOpen(Boolean(link));
         const secondLink = c.trackedLinks?.[1];
         setSecondaryDestinationUrl(secondLink?.destinationUrl ?? "");
-        setSecondaryButtonLabel(secondLink?.label ?? "Open link");
+        setSecondaryButtonLabel(
+          secondLink?.label ?? DEFAULT_LINK_BUTTON_LABEL
+        );
         setSecondLinkOpen(Boolean(secondLink?.destinationUrl));
         setRequireFollow(c.requireFollow ?? false);
         setFollowPromptMessage(c.followPromptMessage ?? "");
         setFollowPromptButtonLabel(
-          c.followPromptButtonLabel ?? "i'm following"
+          c.followPromptButtonLabel ?? DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL
         );
         setFollowProfileButtonEnabled(c.followProfileButtonEnabled ?? false);
-        setFollowProfileButtonLabel(c.followProfileButtonLabel ?? "follow me");
+        setFollowProfileButtonLabel(
+          c.followProfileButtonLabel ?? DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL
+        );
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
@@ -426,18 +441,21 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         ? publicReplyMessages.map((m) => m.trim()).filter(Boolean)
         : [],
       trackedDestinationUrl: trackedDestinationUrl.trim() || "",
-      linkButtonLabel: linkButtonLabel.trim() || "Open link",
+      linkButtonLabel: linkButtonLabel.trim() || DEFAULT_LINK_BUTTON_LABEL,
       secondaryDestinationUrl: secondaryDestinationUrl.trim() || "",
-      secondaryButtonLabel: secondaryButtonLabel.trim() || "Open link",
+      secondaryButtonLabel:
+        secondaryButtonLabel.trim() || DEFAULT_LINK_BUTTON_LABEL,
       requireFollow,
       followPromptMessage: requireFollow ? followPromptMessage.trim() : "",
       followProfileButtonEnabled: requireFollow && followProfileButtonEnabled,
       followProfileButtonLabel:
         requireFollow && followProfileButtonEnabled
-          ? followProfileButtonLabel.trim() || "follow me"
+          ? followProfileButtonLabel.trim() ||
+            DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL
           : "",
       followPromptButtonLabel: requireFollow
-        ? followPromptButtonLabel.trim() || "i'm following"
+        ? followPromptButtonLabel.trim() ||
+          DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL
         : "",
       followUpEnabled,
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",

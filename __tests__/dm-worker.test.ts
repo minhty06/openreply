@@ -1127,7 +1127,7 @@ describe("DM Worker — DM keyword trigger", () => {
       "ig_456",
       "commenter_999",
       expect.any(String),
-      "I'm following ✅",
+      "i'm following",
       "followcheck:auto_789",
       // No profile button configured, so the prompt carries only the postback.
       undefined

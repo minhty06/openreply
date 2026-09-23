@@ -45,6 +45,10 @@ import {
   renderMessageWithoutLink,
 } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
+import {
+  DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL,
+  DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
+} from "@/lib/campaigns/defaults";
 
 import {
   ZernioApiError,
@@ -122,7 +126,9 @@ function profileButtonFor(automation: {
   if (!automation.instagramAccount.username) return undefined;
   return {
     username: automation.instagramAccount.username,
-    title: automation.followProfileButtonLabel || "follow me",
+    title:
+      automation.followProfileButtonLabel ||
+      DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL,
   };
 }
 
@@ -649,7 +655,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           instagramAccountId: automation.instagramAccount.instagramId,
           commentId: commentId,
           text: promptText,
-          buttonTitle: automation.followPromptButtonLabel || "i'm following",
+          buttonTitle:
+            automation.followPromptButtonLabel ||
+            DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
           payload: `followcheck:${automation.id}`,
           postId: mediaId,
           profileButton: profileButtonFor(automation),
@@ -922,7 +930,8 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
               userId: userId,
               text: promptText,
               buttonTitle:
-                automation.followPromptButtonLabel || "i'm following",
+                automation.followPromptButtonLabel ||
+                DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
               payload: `followcheck:${automation.id}`,
               profileButton: profileButtonFor(automation),
             }),
@@ -1305,7 +1314,9 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           instagramAccountId: automation.instagramAccount.instagramId,
           userId: senderId,
           text: promptText,
-          buttonTitle: automation.followPromptButtonLabel || "I'm following ✅",
+          buttonTitle:
+            automation.followPromptButtonLabel ||
+            DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
           payload: `followcheck:${automation.id}`,
         });
       } else {
