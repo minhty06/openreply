@@ -55,6 +55,8 @@ import {
 import {
   FOLLOW_GATE_RECHECK_DELAY_MS,
   decideFollowGateAction,
+  recordFollowGateAsk,
+  recordFollowGateConversion,
   markFollowGateGranted,
   markFollowGatePrompted,
   recordFollowGateMiss,
@@ -633,6 +635,17 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         accessToken.provider === "ZERNIO"
           ? alreadyFollows === false
           : alreadyFollows !== true;
+      // Only an explicit "not following" is recorded as an ask. That is what
+      // makes a later confirmed follow attributable to this campaign: an
+      // unknown status might already be a follower, and counting those would
+      // credit the campaign with people it never won.
+      if (alreadyFollows === false) {
+        await recordFollowGateAsk({
+          automationId: automation.id,
+          workspaceId: automation.workspaceId,
+          userId: commenterId,
+        });
+      }
     }
 
     try {
@@ -1025,6 +1038,15 @@ async function processPostback(
       context: accessToken,
       recipientId: userId,
     });
+    if (follows === true) {
+      // Someone this campaign asked has now been confirmed following. A no-op
+      // for anyone with no ask on record, so people who already followed
+      // before they ever commented are not counted as gained.
+      await recordFollowGateConversion({
+        automationId: automation.id,
+        userId,
+      });
+    }
     if (follows === false) {
       if (fallback) return;
 
@@ -1446,6 +1468,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         accessToken.provider === "ZERNIO"
           ? follows === false
           : follows !== true;
+      if (follows === false) {
+        await recordFollowGateAsk({
+          automationId: automation.id,
+          workspaceId: automation.workspaceId,
+          userId: senderId,
+        });
+      }
     }
 
     const usage = await reserveWorkspaceDMSend(automation.workspaceId);

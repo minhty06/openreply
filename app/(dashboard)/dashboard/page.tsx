@@ -29,6 +29,13 @@ interface DashboardStats {
   instagramAccounts: AccountOption[];
   selectedInstagramAccountId: string | null;
   topKeywords: { keyword: string; count: number }[];
+  followersGainedMonth: number;
+  followersGained: Array<{
+    automationId: string;
+    name: string;
+    thisMonth: number;
+    total: number;
+  }>;
   dailyDMs: { date: string; count: number }[];
   recentLogs: Array<{
     id: string;
@@ -70,8 +77,8 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
-          {[...Array(6)].map((_, i) => (
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 sm:gap-4">
+          {[...Array(7)].map((_, i) => (
             <div key={i} className="panel rounded p-5 h-32">
               <div className="w-10 h-10 rounded bg-surface-hover" />
               <div className="mt-4 h-6 w-16 bg-surface-hover rounded" />
@@ -115,7 +122,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 sm:gap-4">
         <StatCard
           label={t("Active Campaigns")}
           value={stats?.activeAutomations ?? 0}
@@ -125,6 +132,42 @@ export default function DashboardPage() {
         <StatCard label={t("Failed")} value={stats?.dmsFailedMonth ?? 0} />
         <StatCard label={t("Clicks")} value={stats?.clicksThisMonth ?? 0} />
         <StatCard label={t("CTR")} value={`${stats?.ctrThisMonth ?? 0}%`} />
+        <StatCard
+          label={t("Followers Gained")}
+          value={stats?.followersGainedMonth ?? 0}
+        />
+      </div>
+
+      {/* Followers gained, per campaign */}
+      <div className="panel rounded p-4 sm:p-6">
+        <h2 className="text-sm font-semibold text-foreground mb-1">
+          {t("Followers Gained")}
+        </h2>
+        <p className="text-xs text-muted mb-4">
+          {t(
+            "Only campaigns with a follow requirement can attribute a follow, because Instagram reports follower counts per account and never says why someone followed."
+          )}
+        </p>
+        <div className="space-y-3">
+          {stats?.followersGained.length === 0 && (
+            <p className="text-sm text-muted py-4">
+              {t("No campaigns use a follow requirement yet")}
+            </p>
+          )}
+          {stats?.followersGained.map((row) => (
+            <div
+              key={row.automationId}
+              className="flex items-center justify-between gap-3 py-2 border-b border-border last:border-0"
+            >
+              <span className="truncate text-sm font-medium text-foreground">
+                {row.name}
+              </span>
+              <span className="shrink-0 text-xs text-muted">
+                {t("This month")} {row.thisMonth} · {t("Total")} {row.total}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Chart + Recent Activity */}

@@ -32,6 +32,11 @@ export async function GET(request: NextRequest) {
   const accountFilter = selectedAccountId
     ? { instagramAccountId: selectedAccountId }
     : {};
+  // FollowGateAttempt has no instagramAccountId of its own — it reaches the
+  // account through the campaign that asked.
+  const gateAccountFilter = selectedAccountId
+    ? { automation: { instagramAccountId: selectedAccountId } }
+    : {};
 
   const [
     workspace,
@@ -47,6 +52,9 @@ export async function GET(request: NextRequest) {
     clicksThisMonth,
     totalClicks,
     topKeywordRows,
+    followersGainedRows,
+    followersGainedMonthRows,
+    gatedAutomations,
     recentLogs,
     user,
     contactRows,
@@ -128,6 +136,39 @@ export async function GET(request: NextRequest) {
       where: { workspaceId, matchedKeyword: { not: null }, ...accountFilter },
       _count: { _all: true },
     }),
+    // Followers gained, per campaign. A row counts only when this campaign
+    // asked someone Instagram had explicitly reported as not following, and
+    // that person was later confirmed to be following. Instagram reports
+    // follower counts per account and never says why anyone followed, so the
+    // follow gate is the only place an individual follow can be attributed to
+    // one campaign at all.
+    prisma.followGateAttempt.groupBy({
+      by: ["automationId"],
+      where: {
+        workspaceId,
+        askedAt: { not: null },
+        followedAt: { not: null },
+        ...gateAccountFilter,
+      },
+      _count: { _all: true },
+    }),
+    prisma.followGateAttempt.groupBy({
+      by: ["automationId"],
+      where: {
+        workspaceId,
+        askedAt: { not: null },
+        followedAt: { gte: monthStart },
+        ...gateAccountFilter,
+      },
+      _count: { _all: true },
+    }),
+    // Which campaigns can be measured at all. A campaign without the follow
+    // gate is reported as unmeasurable rather than as zero, because zero would
+    // claim it gained nobody when the truth is that nothing was ever asked.
+    prisma.automation.findMany({
+      where: { workspaceId, requireFollow: true, ...accountFilter },
+      select: { id: true, name: true },
+    }),
     prisma.dmLog.findMany({
       where: { workspaceId, ...accountFilter },
       orderBy: { createdAt: "desc" },
@@ -186,6 +227,25 @@ export async function GET(request: NextRequest) {
     }))
   );
 
+  const totalByAutomation = new Map(
+    followersGainedRows.map((row) => [row.automationId, row._count._all])
+  );
+  const monthByAutomation = new Map(
+    followersGainedMonthRows.map((row) => [row.automationId, row._count._all])
+  );
+  const followersGained = gatedAutomations
+    .map((automation) => ({
+      automationId: automation.id,
+      name: automation.name,
+      thisMonth: monthByAutomation.get(automation.id) ?? 0,
+      total: totalByAutomation.get(automation.id) ?? 0,
+    }))
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  const followersGainedMonth = followersGained.reduce(
+    (sum, row) => sum + row.thisMonth,
+    0
+  );
+
   const firstName =
     user?.name?.trim().split(/\s+/)[0] ||
     user?.email?.split("@")[0] ||
@@ -212,6 +272,8 @@ export async function GET(request: NextRequest) {
       totalClicks,
       ctrThisMonth: calculateCtr(clicksThisMonth, dmsSentMonth),
       topKeywords,
+      followersGained,
+      followersGainedMonth,
       dailyDMs,
       recentLogs,
     },

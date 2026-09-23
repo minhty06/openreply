@@ -61,11 +61,78 @@ export async function recordFollowGateMiss({
 }): Promise<{ attempts: number; grantedAt: Date | null }> {
   const row = await prisma.followGateAttempt.upsert({
     where: { automationId_userId: { automationId, userId } },
-    create: { automationId, workspaceId, userId, attempts: 1 },
+    create: {
+      automationId,
+      workspaceId,
+      userId,
+      attempts: 1,
+      askedAt: new Date(),
+    },
     update: { attempts: { increment: 1 } },
     select: { attempts: true, grantedAt: true },
   });
   return { attempts: row.attempts, grantedAt: row.grantedAt };
+}
+
+/**
+ * Record that a campaign asked this person to follow while Instagram
+ * explicitly said they were not following yet.
+ *
+ * This is the denominator half of the followers-gained metric. Only a
+ * confirmed `false` is ever recorded: an unknown status could be someone who
+ * already follows, and crediting a campaign for them would inflate the number
+ * with people it never won.
+ */
+export async function recordFollowGateAsk({
+  automationId,
+  workspaceId,
+  userId,
+}: {
+  automationId: string;
+  workspaceId: string;
+  userId: string;
+}): Promise<void> {
+  const now = new Date();
+  await prisma.followGateAttempt.upsert({
+    where: { automationId_userId: { automationId, userId } },
+    create: {
+      automationId,
+      workspaceId,
+      userId,
+      askedAt: now,
+      lastPromptAt: now,
+    },
+    // Keep the original askedAt: the first ask is when this campaign started
+    // working on them, and a later re-ask should not restart the clock.
+    update: { lastPromptAt: now },
+  });
+}
+
+/**
+ * Record that someone this campaign asked has now been confirmed following.
+ *
+ * `updateMany` rather than `update` so this is a no-op for anyone with no ask
+ * on record — people who already followed before they ever commented must not
+ * be counted as gained. The `followedAt: null` guard keeps the first
+ * confirmation, so the metric reflects when they actually followed rather than
+ * the last time they tapped.
+ */
+export async function recordFollowGateConversion({
+  automationId,
+  userId,
+}: {
+  automationId: string;
+  userId: string;
+}): Promise<void> {
+  await prisma.followGateAttempt.updateMany({
+    where: {
+      automationId,
+      userId,
+      askedAt: { not: null },
+      followedAt: null,
+    },
+    data: { followedAt: new Date() },
+  });
 }
 
 /** Stamp the moment the gate gave someone the link on good faith. */

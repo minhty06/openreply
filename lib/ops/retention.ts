@@ -140,6 +140,11 @@ export async function purgeExpiredRecords(
         lastAttemptAt: {
           lt: cutoff(now, retentionDays.followGateAttempt),
         },
+        // A row that recorded a gained follower is kept indefinitely: it backs
+        // the dashboard's per-campaign followers-gained figure, which would
+        // otherwise quietly shrink a month after each campaign ran. Only the
+        // abandoned patience budgets expire, which is what the window is for.
+        followedAt: null,
       },
     }),
     prisma.dmLog.deleteMany({

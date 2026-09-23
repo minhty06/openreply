@@ -122,6 +122,9 @@ describe("retention", () => {
       expect(daysBefore(cutoffFor("linkClick"))).toBe(30);
       expect(daysBefore(cutoffFor("operationalEvent"))).toBe(30);
       expect(daysBefore(cutoffFor("followGateAttempt"))).toBe(30);
+      expect(
+        mockPrisma.followGateAttempt.deleteMany.mock.calls[0][0].where.followedAt
+      ).toBeNull();
       expect(daysBefore(cutoffFor("dmLog"))).toBe(90);
     });
 
@@ -137,7 +140,13 @@ describe("retention", () => {
       ] as const) {
         const column = AGE_COLUMN[table];
         const where = mockPrisma[table].deleteMany.mock.calls[0][0].where;
-        expect(Object.keys(where)).toEqual([column]);
+        // FollowGateAttempt carries one extra predicate: rows that recorded a
+        // gained follower are never purged, because the dashboard counts them.
+        expect(Object.keys(where).sort()).toEqual(
+          table === "followGateAttempt"
+            ? [column, "followedAt"].sort()
+            : [column]
+        );
         expect(where[column]).toHaveProperty("lt");
         expect(where[column].lt.getTime()).toBeLessThan(NOW.getTime());
       }

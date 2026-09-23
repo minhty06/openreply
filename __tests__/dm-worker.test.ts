@@ -40,6 +40,7 @@ const {
     followGateAttempt: {
       upsert: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
   mockSendPrivateReply: vi.fn(),
@@ -250,6 +251,7 @@ beforeEach(() => {
     grantedAt: null,
   });
   mockPrisma.followGateAttempt.update.mockResolvedValue({});
+  mockPrisma.followGateAttempt.updateMany.mockResolvedValue({ count: 0 });
   mockDecryptToken.mockReturnValue("decrypted_token");
   mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
   mockReserveWorkspaceDMSend.mockResolvedValue({
@@ -907,6 +909,34 @@ describe("DM Worker — Full Pipeline", () => {
       expect(mockSendDirectMessage).toHaveBeenCalled();
       expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
       expect(mockPrisma.followGateAttempt.upsert).not.toHaveBeenCalled();
+    });
+
+    it("credits the campaign when the second look finds the follow", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(true);
+
+      await getProcessor()(recheck());
+
+      expect(mockPrisma.followGateAttempt.updateMany).toHaveBeenCalledWith({
+        where: {
+          automationId: "auto_789",
+          userId: "commenter_999",
+          // Only someone this campaign actually asked can be counted, and only
+          // the first confirmation is kept.
+          askedAt: { not: null },
+          followedAt: null,
+        },
+        data: { followedAt: expect.any(Date) },
+      });
+    });
+
+    it("credits nobody when the status is unknown", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(null);
+
+      await getProcessor()(recheck());
+
+      // An unknown status is not evidence of a follow, so it must not be
+      // counted as one the campaign won.
+      expect(mockPrisma.followGateAttempt.updateMany).not.toHaveBeenCalled();
     });
 
     it("does not spend a patience budget on an unknown status", async () => {

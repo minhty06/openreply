@@ -6,6 +6,8 @@ CREATE TABLE "FollowGateAttempt" (
   "firstAttemptAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "lastAttemptAt" TIMESTAMP(3) NOT NULL,
   "lastPromptAt" TIMESTAMP(3),
+  "askedAt" TIMESTAMP(3),
+  "followedAt" TIMESTAMP(3),
   "grantedAt" TIMESTAMP(3),
   CONSTRAINT "FollowGateAttempt_pkey" PRIMARY KEY ("automationId", "userId"),
   CONSTRAINT "FollowGateAttempt_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -14,3 +16,4 @@ CREATE TABLE "FollowGateAttempt" (
 
 CREATE INDEX "FollowGateAttempt_workspaceId_idx" ON "FollowGateAttempt"("workspaceId");
 CREATE INDEX "FollowGateAttempt_lastAttemptAt_idx" ON "FollowGateAttempt"("lastAttemptAt");
+CREATE INDEX "FollowGateAttempt_workspaceId_followedAt_idx" ON "FollowGateAttempt"("workspaceId", "followedAt");

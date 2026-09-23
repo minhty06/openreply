@@ -437,6 +437,15 @@ model FollowGateAttempt {
   firstAttemptAt DateTime  @default(now())
   lastAttemptAt  DateTime  @updatedAt
   lastPromptAt   DateTime?
+  /// Set when this campaign asked this person to follow while Instagram
+  /// explicitly reported them as NOT following. Only an explicit false counts:
+  /// an unknown status might be a follower already, and recording those would
+  /// let the followers-gained metric take credit for people it never won.
+  askedAt        DateTime?
+  /// Set when someone with askedAt was later confirmed to be following. The
+  /// pair is what makes a gained follower attributable to one campaign —
+  /// Instagram reports follower counts per account and never says why.
+  followedAt     DateTime?
   /// Set once the gate has given this person the link on good faith, so the
   /// grace note is sent only the first time.
   grantedAt      DateTime?
@@ -447,6 +456,7 @@ model FollowGateAttempt {
   @@id([automationId, userId])
   @@index([workspaceId])
   @@index([lastAttemptAt])
+  @@index([workspaceId, followedAt])
 }
 
 model PostbackDelivery {
