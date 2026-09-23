@@ -17,6 +17,7 @@ import {
   DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL,
   DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
   DEFAULT_LINK_BUTTON_LABEL,
+  DEFAULT_PUBLIC_REPLY_MESSAGES,
 } from "@/lib/campaigns/defaults";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -168,8 +169,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [keywordText, setKeywordText] = useState("");
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(false);
 
-  const [publicReplyEnabled, setPublicReplyEnabled] = useState(false);
-  const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([""]);
+  const [publicReplyEnabled, setPublicReplyEnabled] = useState(true);
+  const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([
+    ...DEFAULT_PUBLIC_REPLY_MESSAGES,
+  ]);
 
   const [openingDmEnabled, setOpeningDmEnabled] = useState(false);
   const [openingDmMessage, setOpeningDmMessage] = useState("");
@@ -355,8 +358,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     setMatchMode("specific");
     setKeywordText((row.keywords ?? []).join(", "));
     setDmMessage(row.dmMessage ?? "");
-    setPublicReplyEnabled(Boolean(row.publicReply));
-    setPublicReplyMessages(row.publicReply ? [row.publicReply] : [""]);
+    setPublicReplyEnabled(true);
+    setPublicReplyMessages(
+      row.publicReply ? [row.publicReply] : [...DEFAULT_PUBLIC_REPLY_MESSAGES]
+    );
     const hasOpening = Boolean(row.openingDmMessage);
     setOpeningDmEnabled(hasOpening);
     setOpeningDmMessage(row.openingDmMessage ?? "");
