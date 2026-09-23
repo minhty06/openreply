@@ -846,10 +846,20 @@ async function sendPostbackOnce({
 /**
  * Schedule the second look at follow status after a tap we could not confirm.
  *
- * The job id is deterministic, which is the whole mechanism for not spamming a
- * rapid tapper: BullMQ refuses a duplicate id while the job exists, so six
- * taps in ten seconds collapse into one pending check and one eventual reply.
- * No cooldown state needed.
+ * The job id is bucketed by the re-check window rather than fixed per person,
+ * and the distinction matters more than it looks. BullMQ retains completed
+ * jobs (removeOnComplete: count 1000) and silently drops an `add` whose id is
+ * still retained — it returns the old job and throws nothing. With a fixed id,
+ * a person was therefore re-checked exactly once, and every later tap of
+ * theirs did nothing at all: no re-check, no prompt, no link, until 1000 other
+ * jobs evicted theirs from the completed set. That is the same silence this
+ * whole path exists to prevent.
+ *
+ * Bucketing keeps what the fixed id was actually for: taps inside one window
+ * collapse to a single pending check, so a rapid tapper still gets one reply
+ * rather than six. A tap in a later window gets its own fresh check.
+ *
+ * Credit to diwenne/openreply#73, which found this.
  */
 async function scheduleFollowRecheck({
   job,
@@ -870,7 +880,9 @@ async function scheduleFollowRecheck({
         payload: job.data.payload,
       },
       {
-        jobId: `followrecheck_${automation.id}_${userId}`,
+        jobId: `followrecheck_${automation.id}_${userId}_${Math.floor(
+          Date.now() / FOLLOW_GATE_RECHECK_DELAY_MS,
+        )}`,
         delay: FOLLOW_GATE_RECHECK_DELAY_MS,
       },
     );

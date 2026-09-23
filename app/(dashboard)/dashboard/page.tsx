@@ -30,10 +30,10 @@ interface DashboardStats {
   selectedInstagramAccountId: string | null;
   topKeywords: { keyword: string; count: number }[];
   followersGainedMonth: number;
+  measurableCampaigns: number;
   followersGained: Array<{
     automationId: string;
     name: string;
-    thisMonth: number;
     total: number;
   }>;
   dailyDMs: { date: string; count: number }[];
@@ -151,20 +151,20 @@ export default function DashboardPage() {
         <div className="space-y-3">
           {stats?.followersGained.length === 0 && (
             <p className="text-sm text-muted py-4">
-              {t("No campaigns use a follow requirement yet")}
+              {stats.measurableCampaigns === 0
+                ? t("No campaigns use a follow requirement yet")
+                : t("No followers gained yet")}
             </p>
           )}
           {stats?.followersGained.map((row) => (
             <div
               key={row.automationId}
-              className="flex items-center justify-between gap-3 py-2 border-b border-border last:border-0"
+              className="flex items-center justify-between gap-3"
             >
               <span className="truncate text-sm font-medium text-foreground">
                 {row.name}
               </span>
-              <span className="shrink-0 text-xs text-muted">
-                {t("This month")} {row.thisMonth} · {t("Total")} {row.total}
-              </span>
+              <span className="shrink-0 text-xs text-muted">{row.total}</span>
             </div>
           ))}
         </div>

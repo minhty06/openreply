@@ -233,18 +233,24 @@ export async function GET(request: NextRequest) {
   const monthByAutomation = new Map(
     followersGainedMonthRows.map((row) => [row.automationId, row._count._all])
   );
+  // The month total counts every campaign, not just the five shown below, so
+  // it is summed before the list is trimmed.
+  const followersGainedMonth = [...monthByAutomation.values()].reduce(
+    (sum, count) => sum + count,
+    0
+  );
+  // Top five by followers gained. Campaigns with none are left out rather than
+  // listed as zero: a leaderboard of zeroes is noise, and with the gate on
+  // every campaign the old full list was fourteen rows of mostly nothing.
   const followersGained = gatedAutomations
     .map((automation) => ({
       automationId: automation.id,
       name: automation.name,
-      thisMonth: monthByAutomation.get(automation.id) ?? 0,
       total: totalByAutomation.get(automation.id) ?? 0,
     }))
-    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-  const followersGainedMonth = followersGained.reduce(
-    (sum, row) => sum + row.thisMonth,
-    0
-  );
+    .filter((row) => row.total > 0)
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+    .slice(0, 5);
 
   const firstName =
     user?.name?.trim().split(/\s+/)[0] ||
@@ -274,6 +280,9 @@ export async function GET(request: NextRequest) {
       topKeywords,
       followersGained,
       followersGainedMonth,
+      // Whether the metric can measure anything at all, so the empty state can
+      // tell "nobody has converted yet" apart from "nothing is being asked".
+      measurableCampaigns: gatedAutomations.length,
       dailyDMs,
       recentLogs,
     },

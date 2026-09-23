@@ -894,10 +894,65 @@ describe("DM Worker — Full Pipeline", () => {
           payload: "followcheck:auto_789",
         }),
         expect.objectContaining({
-          jobId: "followrecheck_auto_789_commenter_999",
+          // Bucketed by re-check window, so a later tap is not swallowed.
+          jobId: expect.stringMatching(
+            /^followrecheck_auto_789_commenter_999_\d+$/
+          ),
           delay: 60_000,
         })
       );
+    });
+
+    // The bug this pins: with a fixed job id, BullMQ silently drops an add
+    // whose id is still in the retained completed set, so a person was
+    // re-checked once and then met with total silence on every later tap. The
+    // existing burst test passes either way, because it stays inside one
+    // window — only a tap in a LATER window distinguishes the two.
+    it("schedules a fresh check for a tap in a later window", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+      const processor = getProcessor();
+
+      await processor(followTap());
+      const firstId = mockQueueAdd.mock.calls.find(
+        ([name]) => name === "process-followcheck"
+      )?.[2]?.jobId;
+
+      // Well past the re-check window, the way a tap the next day would be.
+      // Date.now is stubbed rather than using fake timers, which would also
+      // capture the worker's own async scheduling.
+      const realNow = Date.now;
+      const later = realNow() + 10 * 60_000;
+      vi.spyOn(Date, "now").mockImplementation(() => later);
+      try {
+        mockQueueAdd.mockClear();
+        await processor(followTap());
+      } finally {
+        vi.spyOn(Date, "now").mockRestore();
+      }
+      const secondId = mockQueueAdd.mock.calls.find(
+        ([name]) => name === "process-followcheck"
+      )?.[2]?.jobId;
+
+      expect(firstId).toBeDefined();
+      expect(secondId).toBeDefined();
+      expect(secondId).not.toBe(firstId);
+    });
+
+    it("collapses a burst of taps into one check", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+      const processor = getProcessor();
+
+      await processor(followTap());
+      await processor(followTap());
+      await processor(followTap());
+
+      // Same window, so one id: the rapid tapper gets one reply, not three.
+      const ids = new Set(
+        mockQueueAdd.mock.calls
+          .filter(([name]) => name === "process-followcheck")
+          .map(([, , opts]) => opts.jobId)
+      );
+      expect(ids.size).toBe(1);
     });
 
     it("delivers silently when the second look finds the follow", async () => {
@@ -1698,8 +1753,14 @@ describe("durable Zernio postback delivery", () => {
         ([name]) => name === "process-followcheck",
       );
       expect(scheduled).toHaveLength(2);
+      // Both taps land in the same window, so both carry the same id and
+      // BullMQ keeps exactly one pending check.
+      const ids = new Set(scheduled.map(([, , opts]) => opts.jobId));
+      expect(ids.size).toBe(1);
       for (const [, , opts] of scheduled) {
-        expect(opts.jobId).toBe("followrecheck_auto_789_commenter_999");
+        expect(opts.jobId).toMatch(
+          /^followrecheck_auto_789_commenter_999_\d+$/
+        );
         expect(opts.delay).toBe(60_000);
       }
     } finally {
