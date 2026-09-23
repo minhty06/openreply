@@ -1,42 +1,40 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
+import Nodemailer from "next-auth/providers/nodemailer";
 import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
+import { isEmailAllowedToSignIn } from "@/lib/env";
 
 type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
+
+const emailFrom = process.env.EMAIL_FROM ?? "OpenReply <login@example.com>";
+// Setting EMAIL_SERVER switches magic links to your own SMTP server, for
+// self-hosters who do not want a third-party mail service. Resend stays the
+// default, so an existing deployment is unaffected.
+const smtpServer = process.env.EMAIL_SERVER;
+
+/**
+ * Provider id the login form has to sign in with. It differs per transport,
+ * so it is derived here rather than hardcoded at the call site.
+ */
+export const EMAIL_PROVIDER_ID = smtpServer ? "nodemailer" : "resend";
 
 export const authConfig = {
   adapter: PrismaAdapter(prisma as unknown as AdapterPrismaClient),
   providers: [
-    Resend({
-      apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
-      from: process.env.EMAIL_FROM ?? "OpenReply <login@example.com>",
-    }),
+    smtpServer
+      ? Nodemailer({ server: smtpServer, from: emailFrom })
+      : Resend({
+          apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
+          from: emailFrom,
+        }),
   ],
   callbacks: {
-    // Single-tenant lockdown. Login is an open email magic link by default, so
-    // anyone who finds the public URL can create a workspace and spend this
-    // instance's Resend quota. ALLOWED_EMAILS restricts that to a fixed list.
-    // Left unset, behaviour is unchanged (open signup), so this stays a no-op
-    // for multi-tenant deployments.
-    async signIn({ user, email }) {
-      const allowed = (process.env.ALLOWED_EMAILS ?? "")
-        .split(",")
-        .map((entry) => entry.trim().toLowerCase())
-        .filter(Boolean);
-
-      if (allowed.length === 0) return true;
-
-      // The email provider calls signIn twice: once with
-      // email.verificationRequest set, before the magic link is sent, and again
-      // when the link is followed. Rejecting the first pass means a stranger's
-      // address never receives mail at all, rather than being turned away after
-      // the send has already cost quota.
-      void email;
-
-      const address = user.email?.trim().toLowerCase();
-      return Boolean(address && allowed.includes(address));
+    // Runs before the magic link is sent, so a blocked address never receives
+    // one, and again when the link is verified.
+    async signIn({ user }) {
+      return isEmailAllowedToSignIn(user?.email);
     },
     async session({ session, user }) {
       if (session.user) {

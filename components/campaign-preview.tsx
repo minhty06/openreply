@@ -1,5 +1,8 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n/provider";
+
+
 /* eslint-disable @next/next/no-img-element */
 
 /**
@@ -10,7 +13,7 @@
  * the identical frame so switching tabs never resizes the phone.
  */
 
-export type PreviewTab = "post" | "comments" | "dm";
+export type PreviewTab = "post" | "comments" | "dm" | "dmTrigger";
 
 interface CampaignPreviewProps {
   tab: PreviewTab;
@@ -20,6 +23,9 @@ interface CampaignPreviewProps {
   postThumb: string | null;
   caption: string;
   sampleComment: string;
+  // The DM keyword trigger gets its own thread: the user messages first, and
+  // the opening DM is skipped because the conversation is already open.
+  dmTriggerEnabled: boolean;
   publicReplyEnabled: boolean;
   publicReplyMessage: string;
   openingDmEnabled: boolean;
@@ -90,7 +96,7 @@ const Ico = {
 
 /* ----------------------------- helpers ----------------------------- */
 
-function renderMessage(text: string, hasLink: boolean, linkUrl?: string) {
+function renderMessage(text: string, hasLink: boolean, linkUrl: string | undefined, linkPlaceholder: string) {
   const withName = text.replace(/\{username\}/g, SAMPLE_USER);
   return withName.split(/(\{link\})/g).map((part, i) =>
     part === "{link}" ? (
@@ -103,7 +109,7 @@ function renderMessage(text: string, hasLink: boolean, linkUrl?: string) {
         }
       >
         {/* Show the actual link being sent, not a placeholder token. */}
-        {linkUrl || (hasLink ? "your link" : "{link}")}
+        {linkUrl || (hasLink ? linkPlaceholder : "{link}")}
       </span>
     ) : (
       <span key={i}>{part}</span>
@@ -150,7 +156,8 @@ function StatusBar() {
 function Phone({ children }: { children: React.ReactNode }) {
   const btn = "absolute w-[3px] rounded-sm bg-gradient-to-r from-zinc-500 to-zinc-700";
   return (
-    <div className="relative w-[300px]">
+    // max-w-full so the fixed 300px frame cannot overflow a narrow screen
+    <div className="relative w-[300px] max-w-full">
       {/* Left side buttons: action, volume up, volume down */}
       <span className={`${btn} -left-[2px] top-[96px] h-7`} />
       <span className={`${btn} -left-[2px] top-[140px] h-12`} />
@@ -186,6 +193,7 @@ function PostScreen({
   postThumb: string | null;
   caption: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="flex h-full flex-col text-white">
       <StatusBar />
@@ -193,7 +201,7 @@ function PostScreen({
         <span className="w-6">{Ico.back("h-5 w-5")}</span>
         <div className="flex-1 text-center">
           <p className="text-[9px] uppercase tracking-wide text-zinc-400">{username}</p>
-          <p className="text-sm font-semibold">Posts</p>
+          <p className="text-sm font-semibold">{t("Posts")}</p>
         </div>
         <span className="w-6" />
       </div>
@@ -217,10 +225,10 @@ function PostScreen({
         <p className="line-clamp-2">
           <span className="font-semibold">{username}</span>{" "}
           <span className="text-zinc-200">
-            {caption || "Applications close rly soon!!"}
+            {caption || t("Applications close rly soon!!")}
           </span>
         </p>
-        <p className="mt-1 text-zinc-500">View all comments</p>
+        <p className="mt-1 text-zinc-500">{t("View all comments")}</p>
       </div>
       <div className="flex shrink-0 items-center justify-around border-t border-zinc-800 px-2 py-3 text-white">
         {Ico.home("h-6 w-6")}
@@ -246,6 +254,7 @@ function CommentsScreen({
   publicReplyEnabled: boolean;
   publicReplyMessage: string;
 }) {
+  const { t } = useI18n();
   const reactions = ["❤️", "🙌", "🔥", "👏", "😢", "😍", "😮", "😂"];
   return (
     <div className="flex h-full flex-col text-white">
@@ -253,17 +262,17 @@ function CommentsScreen({
       <div className="h-20 bg-zinc-800/70" />
       <div className="flex flex-1 flex-col rounded-t-2xl bg-[#0b0b0b] px-4 pt-3">
         <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-zinc-600" />
-        <p className="text-center text-sm font-semibold">Comments</p>
+        <p className="text-center text-sm font-semibold">{t("Comments")}</p>
 
         <div className="mt-5 flex gap-3">
           <Avatar url={null} size={32} />
           <div className="flex-1">
             <p className="text-xs">
               <span className="font-semibold">{SAMPLE_USER}</span>{" "}
-              <span className="text-zinc-500">Now</span>
+              <span className="text-zinc-500">{t("Now")}</span>
             </p>
             <p className="text-sm">{sampleComment || "yc"}</p>
-            <p className="mt-0.5 text-xs text-zinc-500">Reply</p>
+            <p className="mt-0.5 text-xs text-zinc-500">{t("Reply")}</p>
           </div>
           <span className="mt-1">{Ico.heart("h-3.5 w-3.5 text-zinc-500")}</span>
         </div>
@@ -274,10 +283,10 @@ function CommentsScreen({
             <div className="flex-1">
               <p className="text-xs">
                 <span className="font-semibold">{username}</span>{" "}
-                <span className="text-zinc-500">Now</span>
+                <span className="text-zinc-500">{t("Now")}</span>
               </p>
-              <p className="text-sm">{publicReplyMessage || "Sent you a DM! 📩"}</p>
-              <p className="mt-0.5 text-xs text-zinc-500">Reply</p>
+              <p className="text-sm">{publicReplyMessage || t("Sent you a DM! 📩")}</p>
+              <p className="mt-0.5 text-xs text-zinc-500">{t("Reply")}</p>
             </div>
             <span className="mt-1">{Ico.heart("h-3.5 w-3.5 text-zinc-500")}</span>
           </div>
@@ -292,7 +301,7 @@ function CommentsScreen({
           <div className="mb-3 flex items-center gap-2">
             <Avatar url={avatarUrl} size={28} />
             <div className="flex-1 rounded-full bg-zinc-800 px-3 py-2 text-xs text-zinc-500">
-              Add a comment for {username}…
+              {t("Add a comment for")} {username}…
             </div>
           </div>
         </div>
@@ -320,6 +329,7 @@ function DmScreen({
   followUpMessage,
   followUpDelayMinutes = 0,
   linkUrl,
+  inboundMessage,
 }: {
   username: string;
   avatarUrl: string | null;
@@ -339,7 +349,10 @@ function DmScreen({
   followUpEnabled: boolean;
   followUpMessage: string;
   followUpDelayMinutes?: number;
+  // Present on the keyword-trigger thread: the DM the user sends to start it.
+  inboundMessage?: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="flex h-full flex-col text-white">
       <StatusBar />
@@ -354,20 +367,27 @@ function DmScreen({
       </div>
 
       <div className="flex-1 space-y-3 px-3 py-4">
+        {inboundMessage !== undefined && (
+          <div className="flex justify-end">
+            <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
+              {inboundMessage || t("their message")}
+            </div>
+          </div>
+        )}
         {openingDmEnabled && (
           <>
             <div className="flex items-end gap-2">
               <Avatar url={avatarUrl} size={24} />
               <div className="max-w-[80%] overflow-hidden rounded-2xl rounded-bl-md bg-zinc-800">
-                <p className="whitespace-pre-wrap px-3 py-2 text-sm">{openingDmMessage || "Your opening message…"}</p>
+                <p className="whitespace-pre-wrap px-3 py-2 text-sm">{openingDmMessage || t("Your opening message…")}</p>
                 <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                  {openingDmButtonLabel || "Button label"}
+                  {openingDmButtonLabel || t("Button label")}
                 </div>
               </div>
             </div>
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
-                {openingDmButtonLabel || "Button label"}
+                {openingDmButtonLabel || t("Button label")}
               </div>
             </div>
           </>
@@ -412,10 +432,10 @@ function DmScreen({
                 {(!showCard || bodyText) && (
                   <p className="whitespace-pre-wrap px-3 py-2 text-sm">
                     {!revealMessage
-                      ? "Write a message"
+                      ? t("Write a message")
                       : showCard
                         ? bodyText
-                        : renderMessage(revealMessage, hasLink, linkUrl)}
+                        : renderMessage(revealMessage, hasLink, linkUrl, t("your link"))}
                   </p>
                 )}
                 {showCard && (
@@ -438,7 +458,7 @@ function DmScreen({
           <>
             {followUpDelayMinutes > 0 && (
               <p className="py-1 text-center text-[11px] text-zinc-500">
-                {followUpDelayMinutes} min later
+                {followUpDelayMinutes} {t("min later")}
               </p>
             )}
             <div className="flex items-end gap-2">
@@ -447,7 +467,7 @@ function DmScreen({
                 <p className="whitespace-pre-wrap text-sm">
                   {followUpMessage.trim()
                     ? followUpMessage.replace(/\{username\}/g, SAMPLE_USER)
-                    : "Btw just wanted to say thanks for following me, I appreciate the support 🙌"}
+                    : t("Btw just wanted to say thanks for following me, I appreciate the support 🙌")}
                 </p>
               </div>
             </div>
@@ -459,7 +479,7 @@ function DmScreen({
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-white">
           {Ico.camera("h-4 w-4")}
         </span>
-        <div className="flex-1 rounded-full bg-zinc-800 px-3 py-2 text-xs text-zinc-500">Message…</div>
+        <div className="flex-1 rounded-full bg-zinc-800 px-3 py-2 text-xs text-zinc-500">{t("Message…")}</div>
       </div>
     </div>
   );
@@ -468,17 +488,26 @@ function DmScreen({
 /* ----------------------------- root ----------------------------- */
 
 export default function CampaignPreview(props: CampaignPreviewProps) {
+  const { t } = useI18n();
   const { tab, onTabChange } = props;
   const tabs: { key: PreviewTab; label: string }[] = [
-    { key: "post", label: "Post" },
-    { key: "comments", label: "Comments" },
+    { key: "post", label: t("Post") },
+    { key: "comments", label: t("Comments") },
     { key: "dm", label: "DM" },
+    ...(props.dmTriggerEnabled
+      ? [{ key: "dmTrigger" as const, label: t("DM trigger") }]
+      : []),
   ];
+
+  // The DM-trigger tab disappears when the trigger is switched off; fall back
+  // to the comment thread rather than rendering an empty phone.
+  const activeTab: PreviewTab =
+    tab === "dmTrigger" && !props.dmTriggerEnabled ? "dm" : tab;
 
   return (
     <div className="flex flex-col items-center gap-5">
       <Phone>
-        {tab === "post" && (
+        {activeTab === "post" && (
           <PostScreen
             username={props.username}
             avatarUrl={props.avatarUrl}
@@ -486,7 +515,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             caption={props.caption}
           />
         )}
-        {tab === "comments" && (
+        {activeTab === "comments" && (
           <CommentsScreen
             username={props.username}
             avatarUrl={props.avatarUrl}
@@ -495,7 +524,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             publicReplyMessage={props.publicReplyMessage}
           />
         )}
-        {tab === "dm" && (
+        {activeTab === "dm" && (
           <DmScreen
             username={props.username}
             avatarUrl={props.avatarUrl}
@@ -517,6 +546,29 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             linkUrl={props.linkUrl}
           />
         )}
+        {activeTab === "dmTrigger" && (
+          <DmScreen
+            username={props.username}
+            avatarUrl={props.avatarUrl}
+            // The user opened the conversation, so no opening DM is sent.
+            openingDmEnabled={false}
+            openingDmMessage=""
+            openingDmButtonLabel=""
+            revealMessage={props.revealMessage}
+            hasLink={props.hasLink}
+            linkButtonLabel={props.linkButtonLabel}
+            hasSecondLink={props.hasSecondLink}
+            secondLinkButtonLabel={props.secondLinkButtonLabel}
+            requireFollow={props.requireFollow}
+            followPromptMessage={props.followPromptMessage}
+            followPromptButtonLabel={props.followPromptButtonLabel}
+            followUpEnabled={props.followUpEnabled}
+            followUpMessage={props.followUpMessage}
+            followUpDelayMinutes={props.followUpDelayMinutes}
+            linkUrl={props.linkUrl}
+            inboundMessage={props.sampleComment}
+          />
+        )}
       </Phone>
 
       <div className="inline-flex rounded-full bg-surface p-1">
@@ -526,7 +578,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             type="button"
             onClick={() => onTabChange(t.key)}
             className={`rounded-full px-4 py-1.5 text-sm transition-colors ${
-              tab === t.key
+              activeTab === t.key
                 ? "bg-background font-medium text-foreground ring-1 ring-accent/40"
                 : "text-muted hover:text-foreground"
             }`}
