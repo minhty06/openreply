@@ -194,7 +194,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [followPromptMessage, setFollowPromptMessage] =
     useState(FOLLOW_PROMPT_PRESET);
   const [followProfileButtonEnabled, setFollowProfileButtonEnabled] =
-    useState(false);
+    useState(true);
   const [followProfileButtonLabel, setFollowProfileButtonLabel] = useState(
     DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL
   );

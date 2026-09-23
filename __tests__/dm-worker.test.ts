@@ -1135,6 +1135,38 @@ describe("DM Worker — DM keyword trigger", () => {
     expect(mockSendDirectMessage).not.toHaveBeenCalled();
   });
 
+  // The DM-trigger path used to be the one prompt that never carried the
+  // profile button, so a commenter arriving this way had to go and find the
+  // handle themselves before they could satisfy the gate.
+  it("should attach a profile button to the DM-trigger follow prompt when enabled", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...dmTriggerAutomation,
+        requireFollow: true,
+        followProfileButtonEnabled: true,
+        followProfileButtonLabel: "follow me",
+        instagramAccount: {
+          ...dmTriggerAutomation.instagramAccount,
+          username: "testaccount",
+        },
+      },
+    ]);
+    mockGetUserFollowStatus.mockResolvedValue(false);
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessageWithButton).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      expect.any(String),
+      "i'm following",
+      "followcheck:auto_789",
+      { username: "testaccount", title: "follow me" }
+    );
+  });
+
   // First contact, so the gate is fail-closed like processComment: an
   // unverifiable status must not hand out the link.
   it("should send the follow prompt when follow status cannot be verified", async () => {

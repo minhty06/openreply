@@ -1316,6 +1316,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
             automation.followPromptButtonLabel ||
             DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
           payload: `followcheck:${automation.id}`,
+          profileButton: profileButtonFor(automation),
         });
       } else {
         await sendRevealDirectMessage({
