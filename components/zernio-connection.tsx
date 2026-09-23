@@ -5,7 +5,6 @@
 import { useI18n } from "@/lib/i18n/provider";
 import { useCallback, useEffect, useState } from 'react';
 import Image from 'next/image';
-import { zernioLink } from '@/lib/zernio-links';
 
 type ConnectionData = {
   configured: boolean; profileId?: string | null; webhookReady?: boolean;
@@ -54,10 +53,9 @@ export function ZernioConnection({ canManage }: { canManage: boolean }) {
     <section className="zernio-sponsor rounded-xl border p-5 sm:p-6" aria-labelledby="zernio-heading">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div><h2 id="zernio-heading" className="text-base font-semibold">{t("Easier Instagram setup")}</h2><p className="mt-1 text-sm">{t("Optional connection provider")}</p></div>
-        <a href={zernioLink({ placement: 'settings-logo' })} target="_blank" rel="noopener noreferrer" aria-label={t("Zernio, OpenReply sponsor")}><Image src="/brand/zernio-primary.svg" alt="Zernio" width={106} height={32} className="h-auto" /></a>
+        <Image src="/brand/zernio-primary.svg" alt="Zernio" width={106} height={32} className="h-auto" />
       </div>
       <p className="mt-4 text-sm leading-6">{t("Connect Instagram without creating your own Meta developer app. Zernio is a paid service and an OpenReply sponsor. Your campaigns and hosting stay in OpenReply.")}</p>
-      <p className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm"><a className="underline underline-offset-4" href={zernioLink({ path: '/signup', placement: 'settings-signup' })} target="_blank" rel="noopener noreferrer">{t("Get a Zernio API key")}</a><a className="underline underline-offset-4" href={zernioLink({ path: '/pricing', placement: 'settings-pricing' })} target="_blank" rel="noopener noreferrer">{t("View pricing")}</a></p>
       {!canManage ? <p className="mt-4 text-sm">{t("Ask your workspace owner or admin to configure Zernio.")}</p> : <>
         {error && <p role="alert" className="mt-4 rounded border border-error/30 bg-white p-3 text-sm text-error">{error === "Could not load connection." ? t("Could not load connection.") : error}</p>}
         {!data?.configured ? <form className="mt-5 space-y-3" onSubmit={e => { e.preventDefault(); void act({ method: 'POST', body: { apiKey } }); }}>
