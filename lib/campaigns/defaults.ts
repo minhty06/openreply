@@ -39,29 +39,20 @@ export const DEFAULT_PUBLIC_REPLY_MESSAGES: string[] = [
 export const FOLLOW_PROMPT_PRESET =
   "quick favor before i send your link. i don't make any money from this, " +
   "it's free. if you want to support me so i can keep creating these " +
-  "resources, please consider giving me a follow — i'll send you the " +
+  "resources, please consider giving me a follow, i'll send you the " +
   "resource right after :)";
 
 /**
- * Second prompt, after a delayed re-check still could not see the follow.
- * Instagram's follow status lags a fresh follow by a few seconds, so by this
- * point the likeliest explanation is still an honest follower rather than a
- * chancer — the copy says so instead of accusing them.
+ * The one nudge after a delayed re-check still could not see the follow.
+ * Instagram's follow status lags a fresh follow by a few seconds, so even here
+ * the likeliest explanation is an honest follower rather than a chancer, and
+ * the copy says so instead of accusing them. The next miss gives up and sends
+ * the link.
  */
 export const FOLLOW_PROMPT_RETRY =
   "instagram sometimes takes a minute to register a new follow. here's my " +
-  "profile if you need it — tap the button again once it goes through and " +
+  "profile if you need it. tap the button again once it goes through and " +
   "i'll send your link right over";
-
-/**
- * Third and last prompt. It says the link is coming either way, which is both
- * true and the point: someone stuck behind a status check they cannot see or
- * influence should not be left guessing whether the gate is broken.
- */
-export const FOLLOW_PROMPT_LAST_CALL =
-  "still can't see the follow on my end. tap my profile above, follow, then " +
-  "hit the button one more time — if it still doesn't come through i'll just " +
-  "send it over anyway";
 
 /**
  * Sent with the link once someone has made FOLLOW_GATE_GRACE_AFTER honest
@@ -69,7 +60,7 @@ export const FOLLOW_PROMPT_LAST_CALL =
  * check they cannot influence, so the gate gives up rather than trap them.
  */
 export const FOLLOW_PROMPT_GRACE =
-  "sending it anyway :) if you did follow, thank you — it genuinely helps " +
+  "sending it anyway :) if you did follow, thank you. it genuinely helps " +
   "me keep making these";
 
 export const DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL = "i'm following";

@@ -972,30 +972,10 @@ describe("DM Worker — Full Pipeline", () => {
       expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
     });
 
-    it("warns that the link is coming anyway on the miss before grace", async () => {
+    it("gives up and sends the link once, with the note, on the second miss", async () => {
       mockGetUserFollowStatus.mockResolvedValue(false);
       mockPrisma.followGateAttempt.upsert.mockResolvedValue({
         attempts: 2,
-        grantedAt: null,
-      });
-
-      await getProcessor()(recheck());
-
-      expect(mockSendDirectMessageWithButton).toHaveBeenCalledWith(
-        "decrypted_token",
-        "ig_456",
-        "commenter_999",
-        expect.stringContaining("send it over anyway"),
-        "i'm following",
-        "followcheck:auto_789",
-        undefined
-      );
-    });
-
-    it("gives up and sends the link once, with the note, after three misses", async () => {
-      mockGetUserFollowStatus.mockResolvedValue(false);
-      mockPrisma.followGateAttempt.upsert.mockResolvedValue({
-        attempts: 3,
         grantedAt: null,
       });
 
@@ -1018,7 +998,7 @@ describe("DM Worker — Full Pipeline", () => {
     it("does not repeat the grace note on a later tap", async () => {
       mockGetUserFollowStatus.mockResolvedValue(false);
       mockPrisma.followGateAttempt.upsert.mockResolvedValue({
-        attempts: 4,
+        attempts: 3,
         grantedAt: new Date("2026-09-01T00:00:00.000Z"),
       });
 

@@ -11,19 +11,17 @@
  * So refusals are handled in two stages. A tap that cannot be confirmed says
  * nothing at all and looks again a minute later, which is where the lag case
  * resolves without anyone being told off. Only the second look counts as a
- * miss, and after a few of those the gate stops asking and sends the link.
+ * miss: the first miss explains the lag and asks once more, and the next one
+ * gives up and sends the link.
  *
  * The cost of that generosity is bounded and worth naming: someone determined
- * to game it gets exactly one link per campaign, having spent three taps and
- * several minutes to obtain what one real follow would have given them
+ * to game it gets exactly one link per campaign, having spent two taps and a
+ * couple of minutes to obtain what one real follow would have given them
  * immediately.
  */
 
 import { prisma } from "@/lib/db/client";
-import {
-  FOLLOW_PROMPT_LAST_CALL,
-  FOLLOW_PROMPT_RETRY,
-} from "@/lib/campaigns/defaults";
+import { FOLLOW_PROMPT_RETRY } from "@/lib/campaigns/defaults";
 
 /**
  * How long to wait before looking at follow status a second time. Comfortably
@@ -34,7 +32,7 @@ import {
 export const FOLLOW_GATE_RECHECK_DELAY_MS = 60_000;
 
 /** Confirmed misses after which the gate gives up and sends the link. */
-export const FOLLOW_GATE_GRACE_AFTER = 3;
+export const FOLLOW_GATE_GRACE_AFTER = 2;
 
 export type FollowGateDecision =
   | { action: "prompt"; message: string }
@@ -166,13 +164,12 @@ export async function markFollowGatePrompted({
 /**
  * Map a confirmed-miss count onto what to do about it.
  *
- * The first miss gets the lag explanation rather than the campaign's own
- * prompt: that text is already sitting in their inbox from the first ask, and
+ * The miss gets the lag explanation rather than the campaign's own prompt:
+ * that text is already sitting in their inbox from the first ask, and
  * repeating it verbatim reads like the gate did not register the tap at all.
+ * The next one gives up, so nobody is asked more than twice in total.
  */
 export function decideFollowGateAction(attempts: number): FollowGateDecision {
   if (attempts >= FOLLOW_GATE_GRACE_AFTER) return { action: "grant" };
-  if (attempts >= FOLLOW_GATE_GRACE_AFTER - 1)
-    return { action: "prompt", message: FOLLOW_PROMPT_LAST_CALL };
   return { action: "prompt", message: FOLLOW_PROMPT_RETRY };
 }
