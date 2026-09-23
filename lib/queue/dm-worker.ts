@@ -6,6 +6,7 @@ import {
   MESSAGE_JOB_NAME,
   POSTBACK_JOB_NAME,
   FOLLOWUP_JOB_NAME,
+  FOLLOWCHECK_JOB_NAME,
   type DmQueueJob,
   type ProcessCommentJob,
   type ProcessMessageJob,
@@ -48,8 +49,16 @@ import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import {
   DEFAULT_FOLLOW_PROFILE_BUTTON_LABEL,
   DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
+  FOLLOW_PROMPT_GRACE,
   FOLLOW_PROMPT_PRESET,
 } from "@/lib/campaigns/defaults";
+import {
+  FOLLOW_GATE_RECHECK_DELAY_MS,
+  decideFollowGateAction,
+  markFollowGateGranted,
+  markFollowGatePrompted,
+  recordFollowGateMiss,
+} from "@/lib/automation/follow-gate";
 
 import {
   ZernioApiError,
@@ -821,7 +830,101 @@ async function sendPostbackOnce({
  * The postback payload is `reveal:<automationId>`; the sender is the user's
  * IGSID (same id as their comment author id), which we DM directly.
  */
-async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
+/**
+ * Schedule the second look at follow status after a tap we could not confirm.
+ *
+ * The job id is deterministic, which is the whole mechanism for not spamming a
+ * rapid tapper: BullMQ refuses a duplicate id while the job exists, so six
+ * taps in ten seconds collapse into one pending check and one eventual reply.
+ * No cooldown state needed.
+ */
+async function scheduleFollowRecheck({
+  job,
+  automation,
+  userId,
+}: {
+  job: Job<ProcessPostbackJob>;
+  automation: { id: string };
+  userId: string;
+}): Promise<void> {
+  try {
+    await getDMQueue().add(
+      FOLLOWCHECK_JOB_NAME,
+      {
+        accountConnectionId: job.data.accountConnectionId,
+        instagramAccountId: job.data.instagramAccountId,
+        userId,
+        payload: job.data.payload,
+      },
+      {
+        jobId: `followrecheck_${automation.id}_${userId}`,
+        delay: FOLLOW_GATE_RECHECK_DELAY_MS,
+      },
+    );
+  } catch (error) {
+    // A duplicate id means a check is already pending for this person, which
+    // is the intended outcome rather than a problem.
+    console.log(
+      "[DM Worker] Could not schedule follow re-check:",
+      formatError(error),
+    );
+  }
+}
+
+/**
+ * Record a follow-gate bounce where the operator can actually see it. Until
+ * this existed a refused tap wrote nothing anywhere, so there was no way to
+ * tell one confused person from a hundred.
+ *
+ * Written only on the first confirmed miss and on the grace grant: bounces
+ * cost no DM quota, so a row per tap would let one person inflate the table.
+ * `followStatus` is recorded so a wave of unknown statuses during a Meta
+ * incident cannot be misread as a wave of people lying.
+ */
+async function recordFollowGateEvent({
+  workspaceId,
+  automationId,
+  userId,
+  attempts,
+  granted,
+}: {
+  workspaceId: string;
+  automationId: string;
+  userId: string;
+  attempts: number;
+  granted: boolean;
+}): Promise<void> {
+  try {
+    await prisma.operationalEvent.create({
+      data: {
+        workspaceId,
+        source: "WORKER",
+        level: "INFO",
+        message: granted
+          ? `Follow gate sent the link on good faith after ${attempts} unconfirmed attempts`
+          : "Follow gate could not confirm a follow after the delayed re-check",
+        payload: {
+          automationId,
+          userId,
+          attempts,
+          followStatus: "false",
+          granted,
+        },
+      },
+    });
+  } catch (error) {
+    // Observability must never break delivery.
+    console.log(
+      "[DM Worker] Could not record follow-gate event:",
+      formatError(error),
+    );
+  }
+}
+
+async function processPostback(
+  job: Job<ProcessPostbackJob>,
+  { isRecheck = false }: { isRecheck?: boolean } = {},
+): Promise<void> {
   const { instagramAccountId, userId, payload, fallback } = job.data;
 
   const isFollowCheck = payload.startsWith("followcheck:");
@@ -901,12 +1004,22 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
           .digest("hex")
       : null;
 
-  // Follow-gate: before revealing the link, verify the user follows. On a
-  // `followcheck:` tap a non-follower gets the prompt again (no quota spent);
-  // on a read fallback a non-follower is silently skipped — the gate must not
-  // be bypassable by just reading the DM and waiting. Following, or
-  // unverifiable (null), falls through and delivers the link — fail-open so a
-  // real follower is never trapped.
+  // Follow-gate: before revealing the link, verify the user follows.
+  //
+  // Following, or an unverifiable status (null), falls through and delivers —
+  // fail-open, so a real follower is never trapped by an API that reports a
+  // rate-limit and a stranger identically.
+  //
+  // An explicit "not following" is handled in two stages, because Instagram
+  // takes a few seconds to register a fresh follow and an honest person who
+  // taps quickly lands here. The first refusal after a tap therefore says
+  // nothing at all and schedules a second look; only that second look counts
+  // as a miss, escalates the wording, and eventually gives up and sends the
+  // link. See lib/automation/follow-gate.ts.
+  //
+  // A read fallback stays fail-closed and silent throughout: the gate must not
+  // be bypassable by reading the DM and waiting, so it never earns a re-check.
+  let graceGranted = false;
   if ((isFollowCheck || fallback) && automation.requireFollow) {
     const follows = await getUserFollowStatus({
       context: accessToken,
@@ -914,34 +1027,91 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     });
     if (follows === false) {
       if (fallback) return;
-      const promptText = renderMessageWithoutLink({
-        message:
-          automation.followPromptMessage || FOLLOW_PROMPT_PRESET,
-        commenterName,
-      });
-      try {
-        await sendPostbackOnce({
-          operationId,
-          send: () =>
-            sendDirectMessageWithButton({
-              context: accessToken,
-              instagramAccountId: automation.instagramAccount.instagramId,
-              userId: userId,
-              text: promptText,
-              buttonTitle:
-                automation.followPromptButtonLabel ||
-                DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
-              payload: `followcheck:${automation.id}`,
-              profileButton: profileButtonFor(automation),
-            }),
-        });
-      } catch (error) {
-        console.log(
-          "[DM Worker] Failed to re-send follow prompt:",
-          formatError(error),
-        );
+
+      if (!isRecheck) {
+        await scheduleFollowRecheck({ job, automation, userId });
+        return;
       }
-      return;
+
+      // The delayed look also came back false, so this counts. Only an
+      // explicit false ever reaches here — an unknown status fell through
+      // above, and must never consume someone's patience budget.
+      const { attempts, grantedAt } = await recordFollowGateMiss({
+        automationId: automation.id,
+        workspaceId: automation.workspaceId,
+        userId,
+      });
+      const decision = decideFollowGateAction(attempts);
+
+      if (attempts === 1 || decision.action === "grant") {
+        await recordFollowGateEvent({
+          workspaceId: automation.workspaceId,
+          automationId: automation.id,
+          userId,
+          attempts,
+          granted: decision.action === "grant",
+        });
+      }
+
+      if (decision.action === "prompt") {
+        const promptText = renderMessageWithoutLink({
+          message: decision.message,
+          commenterName,
+        });
+        try {
+          await sendPostbackOnce({
+            operationId,
+            send: () =>
+              sendDirectMessageWithButton({
+                context: accessToken,
+                instagramAccountId: automation.instagramAccount.instagramId,
+                userId: userId,
+                text: promptText,
+                buttonTitle:
+                  automation.followPromptButtonLabel ||
+                  DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
+                payload: `followcheck:${automation.id}`,
+                profileButton: profileButtonFor(automation),
+              }),
+          });
+          await markFollowGatePrompted({
+            automationId: automation.id,
+            userId,
+          });
+        } catch (error) {
+          console.log(
+            "[DM Worker] Failed to re-send follow prompt:",
+            formatError(error),
+          );
+        }
+        return;
+      }
+
+      // Grace: stop asking and deliver. The note goes out only the first time,
+      // so a later tap re-sends the link without repeating the speech.
+      graceGranted = !grantedAt;
+    }
+  }
+
+  if (graceGranted) {
+    try {
+      await sendDirectMessage({
+        context: accessToken,
+        instagramAccountId: automation.instagramAccount.instagramId,
+        userId: userId,
+        message: renderMessageWithoutLink({
+          message: FOLLOW_PROMPT_GRACE,
+          commenterName,
+        }),
+      });
+      await markFollowGateGranted({ automationId: automation.id, userId });
+    } catch (error) {
+      // The link matters more than the note, so a failure here must not stop
+      // the delivery below.
+      console.log(
+        "[DM Worker] Failed to send follow-gate grace note:",
+        formatError(error),
+      );
     }
   }
 
@@ -1402,6 +1572,11 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
+  }
+  if (job.name === FOLLOWCHECK_JOB_NAME) {
+    return processPostback(job as Job<ProcessPostbackJob>, {
+      isRecheck: true,
+    });
   }
   if (job.name === FOLLOWUP_JOB_NAME) {
     return processFollowUp(job as Job<ProcessFollowUpJob>);

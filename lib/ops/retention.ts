@@ -26,12 +26,18 @@ export type RetentionDays = {
   linkClick: number;
   operationalEvent: number;
   dmLog: number;
+  followGateAttempt: number;
 };
 
 export const DEFAULT_RETENTION_DAYS: RetentionDays = {
   webhookEvent: 7,
   linkClick: 30,
   operationalEvent: 30,
+  // Follow-gate patience budgets. Unlike DmLog this has no floor: losing a row
+  // resets how generous the gate is to one person, it never re-sends a DM. A
+  // month is long enough that someone cannot reset their own budget by waiting
+  // out the window in any useful way.
+  followGateAttempt: 30,
   dmLog: 90,
 };
 
@@ -84,6 +90,10 @@ export function resolveRetentionDays(): RetentionDays {
       "RETENTION_OPERATIONAL_EVENT_DAYS",
       DEFAULT_RETENTION_DAYS.operationalEvent
     ),
+    followGateAttempt: readDays(
+      "RETENTION_FOLLOW_GATE_ATTEMPT_DAYS",
+      DEFAULT_RETENTION_DAYS.followGateAttempt
+    ),
     dmLog: Math.max(dmLog, DM_LOG_MIN_DAYS),
   };
 }
@@ -114,7 +124,8 @@ export async function purgeExpiredRecords(
 ): Promise<PurgeResult> {
   const retentionDays = resolveRetentionDays();
 
-  const [webhookEvent, linkClick, operationalEvent, dmLog] = await Promise.all([
+  const [webhookEvent, linkClick, operationalEvent, followGateAttempt, dmLog] =
+    await Promise.all([
     prisma.webhookEvent.deleteMany({
       where: { createdAt: { lt: cutoff(now, retentionDays.webhookEvent) } },
     }),
@@ -123,6 +134,13 @@ export async function purgeExpiredRecords(
     }),
     prisma.operationalEvent.deleteMany({
       where: { createdAt: { lt: cutoff(now, retentionDays.operationalEvent) } },
+    }),
+    prisma.followGateAttempt.deleteMany({
+      where: {
+        lastAttemptAt: {
+          lt: cutoff(now, retentionDays.followGateAttempt),
+        },
+      },
     }),
     prisma.dmLog.deleteMany({
       where: { createdAt: { lt: cutoff(now, retentionDays.dmLog) } },
@@ -133,6 +151,7 @@ export async function purgeExpiredRecords(
     webhookEvent: webhookEvent.count,
     linkClick: linkClick.count,
     operationalEvent: operationalEvent.count,
+    followGateAttempt: followGateAttempt.count,
     dmLog: dmLog.count,
   };
 

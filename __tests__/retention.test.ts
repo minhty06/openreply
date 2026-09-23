@@ -5,6 +5,7 @@ const { mockPrisma } = vi.hoisted(() => ({
     webhookEvent: { deleteMany: vi.fn() },
     linkClick: { deleteMany: vi.fn() },
     operationalEvent: { deleteMany: vi.fn() },
+    followGateAttempt: { deleteMany: vi.fn() },
     dmLog: { deleteMany: vi.fn() },
   },
 }));
@@ -25,14 +26,28 @@ const RETENTION_ENV_VARS = [
   "RETENTION_LINK_CLICK_DAYS",
   "RETENTION_OPERATIONAL_EVENT_DAYS",
   "RETENTION_DM_LOG_DAYS",
+  "RETENTION_FOLLOW_GATE_ATTEMPT_DAYS",
 ] as const;
+
+/**
+ * Each table's age column. FollowGateAttempt expires from the last attempt
+ * rather than the first, so someone's patience budget ages out of inactivity
+ * instead of being reset on a fixed schedule from when they first appeared.
+ */
+const AGE_COLUMN: Record<keyof typeof mockPrisma, string> = {
+  webhookEvent: "createdAt",
+  linkClick: "createdAt",
+  operationalEvent: "createdAt",
+  followGateAttempt: "lastAttemptAt",
+  dmLog: "createdAt",
+};
 
 /** 2026-08-17T12:00:00Z — fixed so cutoff arithmetic is exact. */
 const NOW = new Date("2026-08-17T12:00:00.000Z");
 
 function cutoffFor(table: keyof typeof mockPrisma): Date {
   const call = mockPrisma[table].deleteMany.mock.calls[0][0];
-  return call.where.createdAt.lt;
+  return call.where[AGE_COLUMN[table]].lt;
 }
 
 function daysBefore(date: Date, from: Date = NOW): number {
@@ -47,6 +62,7 @@ describe("retention", () => {
     mockPrisma.webhookEvent.deleteMany.mockResolvedValue({ count: 0 });
     mockPrisma.linkClick.deleteMany.mockResolvedValue({ count: 0 });
     mockPrisma.operationalEvent.deleteMany.mockResolvedValue({ count: 0 });
+    mockPrisma.followGateAttempt.deleteMany.mockResolvedValue({ count: 0 });
     mockPrisma.dmLog.deleteMany.mockResolvedValue({ count: 0 });
   });
 
@@ -105,6 +121,7 @@ describe("retention", () => {
       expect(daysBefore(cutoffFor("webhookEvent"))).toBe(7);
       expect(daysBefore(cutoffFor("linkClick"))).toBe(30);
       expect(daysBefore(cutoffFor("operationalEvent"))).toBe(30);
+      expect(daysBefore(cutoffFor("followGateAttempt"))).toBe(30);
       expect(daysBefore(cutoffFor("dmLog"))).toBe(90);
     });
 
@@ -115,12 +132,14 @@ describe("retention", () => {
         "webhookEvent",
         "linkClick",
         "operationalEvent",
+        "followGateAttempt",
         "dmLog",
       ] as const) {
+        const column = AGE_COLUMN[table];
         const where = mockPrisma[table].deleteMany.mock.calls[0][0].where;
-        expect(Object.keys(where)).toEqual(["createdAt"]);
-        expect(where.createdAt).toHaveProperty("lt");
-        expect(where.createdAt.lt.getTime()).toBeLessThan(NOW.getTime());
+        expect(Object.keys(where)).toEqual([column]);
+        expect(where[column]).toHaveProperty("lt");
+        expect(where[column].lt.getTime()).toBeLessThan(NOW.getTime());
       }
     });
 
@@ -128,6 +147,7 @@ describe("retention", () => {
       mockPrisma.webhookEvent.deleteMany.mockResolvedValue({ count: 5503 });
       mockPrisma.linkClick.deleteMany.mockResolvedValue({ count: 12 });
       mockPrisma.operationalEvent.deleteMany.mockResolvedValue({ count: 4 });
+      mockPrisma.followGateAttempt.deleteMany.mockResolvedValue({ count: 2 });
       mockPrisma.dmLog.deleteMany.mockResolvedValue({ count: 1 });
 
       const result = await purgeExpiredRecords(NOW);
@@ -136,9 +156,10 @@ describe("retention", () => {
         webhookEvent: 5503,
         linkClick: 12,
         operationalEvent: 4,
+        followGateAttempt: 2,
         dmLog: 1,
       });
-      expect(result.totalDeleted).toBe(5520);
+      expect(result.totalDeleted).toBe(5522);
       expect(result.retentionDays).toEqual(DEFAULT_RETENTION_DAYS);
     });
 

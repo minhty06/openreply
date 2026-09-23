@@ -60,6 +60,12 @@ export interface ProcessFollowUpJob {
   commenterName?: string | null;
 }
 
+// The delayed second look at follow status, scheduled when a "I'm following"
+// tap could not be confirmed. Carries the same shape as the tap it came from,
+// because it resumes exactly that work — only the job name differs, which is
+// what tells the worker this is the second look rather than the first.
+export type ProcessFollowCheckJob = ProcessPostbackJob;
+
 // An inbound DM from a user. Campaigns with `dmTriggerEnabled` whose keywords
 // match the text reply to the sender.
 export interface ProcessMessageJob {
@@ -77,6 +83,7 @@ export type DmQueueJob =
   | ProcessMessageJob;
 
 export const POSTBACK_JOB_NAME = "process-postback";
+export const FOLLOWCHECK_JOB_NAME = "process-followcheck";
 export const FOLLOWUP_JOB_NAME = "process-followup";
 export const MESSAGE_JOB_NAME = "process-message";
 

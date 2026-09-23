@@ -37,6 +37,10 @@ const {
     operationalEvent: {
       create: vi.fn(),
     },
+    followGateAttempt: {
+      upsert: vi.fn(),
+      update: vi.fn(),
+    },
   },
   mockSendPrivateReply: vi.fn(),
   mockSendPrivateReplyWithLinkButton: vi.fn(),
@@ -116,6 +120,7 @@ vi.mock("@/lib/queue/client", () => ({
   }),
   getRedisConnection: vi.fn(),
   POSTBACK_JOB_NAME: "process-postback",
+  FOLLOWCHECK_JOB_NAME: "process-followcheck",
   FOLLOWUP_JOB_NAME: "process-followup",
   MESSAGE_JOB_NAME: "process-message",
 }));
@@ -239,6 +244,12 @@ beforeEach(() => {
     workspaceId: "workspace_123",
   });
   mockPrisma.operationalEvent.create.mockResolvedValue({});
+  // First confirmed miss unless a test says otherwise.
+  mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+    attempts: 1,
+    grantedAt: null,
+  });
+  mockPrisma.followGateAttempt.update.mockResolvedValue({});
   mockDecryptToken.mockReturnValue("decrypted_token");
   mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
   mockReserveWorkspaceDMSend.mockResolvedValue({
@@ -823,6 +834,196 @@ describe("DM Worker — Full Pipeline", () => {
     expect(mockSendDirectMessage).not.toHaveBeenCalled();
     expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
     expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+  });
+
+  // The whole Meta bounce path had no coverage before this, so the old
+  // "re-prompt on every tap, forever, untracked" behaviour was unpinned.
+  describe("follow gate — an unconfirmed tap", () => {
+    function gatedAutomation(overrides: Record<string, unknown> = {}) {
+      return {
+        ...mockAutomation,
+        requireFollow: true,
+        trackedLinks: [],
+        ...overrides,
+      };
+    }
+
+    function followTap() {
+      return createMockPostbackJob({
+        instagramAccountId: "ig_456",
+        userId: "commenter_999",
+        payload: "followcheck:auto_789",
+      });
+    }
+
+    function recheck() {
+      return {
+        ...createMockPostbackJob({
+          instagramAccountId: "ig_456",
+          userId: "commenter_999",
+          payload: "followcheck:auto_789",
+        }),
+        name: "process-followcheck",
+      };
+    }
+
+    beforeEach(() => {
+      mockPrisma.automation.findMany.mockResolvedValue([]);
+      mockPrisma.automation.findFirst.mockResolvedValue(gatedAutomation());
+    });
+
+    it("says nothing and schedules a second look, spending no quota", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+
+      await getProcessor()(followTap());
+
+      // Instagram lags a fresh follow, so an honest follower who taps fast
+      // must not be told off before that has had time to settle.
+      expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
+      expect(mockSendDirectMessage).not.toHaveBeenCalled();
+      // A bounce has always been free, and must stay free.
+      expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+      expect(mockPrisma.followGateAttempt.upsert).not.toHaveBeenCalled();
+
+      expect(mockQueueAdd).toHaveBeenCalledWith(
+        "process-followcheck",
+        expect.objectContaining({
+          userId: "commenter_999",
+          payload: "followcheck:auto_789",
+        }),
+        expect.objectContaining({
+          jobId: "followrecheck_auto_789_commenter_999",
+          delay: 60_000,
+        })
+      );
+    });
+
+    it("delivers silently when the second look finds the follow", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(true);
+
+      await getProcessor()(recheck());
+
+      // The lag case, resolved with a link and no lecture.
+      expect(mockSendDirectMessage).toHaveBeenCalled();
+      expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
+      expect(mockPrisma.followGateAttempt.upsert).not.toHaveBeenCalled();
+    });
+
+    it("does not spend a patience budget on an unknown status", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(null);
+
+      await getProcessor()(recheck());
+
+      // An unknown status means Instagram would not say, which is not the
+      // same as the person saying no — it must never count against them.
+      expect(mockPrisma.followGateAttempt.upsert).not.toHaveBeenCalled();
+      expect(mockSendDirectMessage).toHaveBeenCalled();
+    });
+
+    it("escalates the wording on a confirmed miss", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+      mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+        attempts: 1,
+        grantedAt: null,
+      });
+
+      await getProcessor()(recheck());
+
+      expect(mockSendDirectMessageWithButton).toHaveBeenCalledWith(
+        "decrypted_token",
+        "ig_456",
+        "commenter_999",
+        expect.stringContaining("instagram sometimes takes a minute"),
+        "i'm following",
+        "followcheck:auto_789",
+        undefined
+      );
+      expect(mockSendDirectMessage).not.toHaveBeenCalled();
+      expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    });
+
+    it("warns that the link is coming anyway on the miss before grace", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+      mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+        attempts: 2,
+        grantedAt: null,
+      });
+
+      await getProcessor()(recheck());
+
+      expect(mockSendDirectMessageWithButton).toHaveBeenCalledWith(
+        "decrypted_token",
+        "ig_456",
+        "commenter_999",
+        expect.stringContaining("send it over anyway"),
+        "i'm following",
+        "followcheck:auto_789",
+        undefined
+      );
+    });
+
+    it("gives up and sends the link once, with the note, after three misses", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+      mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+        attempts: 3,
+        grantedAt: null,
+      });
+
+      await getProcessor()(recheck());
+
+      // Nobody stays stuck behind a check they cannot see or influence.
+      expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
+      const sent = mockSendDirectMessage.mock.calls.map((call) => call[3]);
+      expect(sent.some((text: string) => text?.includes("sending it anyway"))).toBe(
+        true
+      );
+      expect(mockPrisma.followGateAttempt.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { grantedAt: expect.any(Date) },
+        })
+      );
+      expect(mockReserveWorkspaceDMSend).toHaveBeenCalled();
+    });
+
+    it("does not repeat the grace note on a later tap", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+      mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+        attempts: 4,
+        grantedAt: new Date("2026-09-01T00:00:00.000Z"),
+      });
+
+      await getProcessor()(recheck());
+
+      const sent = mockSendDirectMessage.mock.calls.map((call) => call[3]);
+      expect(sent.some((text: string) => text?.includes("sending it anyway"))).toBe(
+        false
+      );
+      // The link still goes out, matching the existing "every tap re-sends the
+      // reveal" behaviour; only the speech is not repeated.
+      expect(mockSendDirectMessage).toHaveBeenCalled();
+    });
+
+    it("records the bounce where the operator can see it", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+
+      await getProcessor()(recheck());
+
+      expect(mockPrisma.operationalEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            workspaceId: "workspace_123",
+            source: "WORKER",
+            level: "INFO",
+            payload: expect.objectContaining({
+              automationId: "auto_789",
+              userId: "commenter_999",
+              attempts: 1,
+              granted: false,
+            }),
+          }),
+        })
+      );
+    });
   });
 
   it("should deliver a follow-gated read fallback once the user follows", async () => {
@@ -1442,7 +1643,10 @@ describe("durable Zernio postback delivery", () => {
     }
   });
 
-  it("deduplicates follow-gate prompts as well as reveal messages", async () => {
+  // A tap that cannot be confirmed now sends nothing at all and schedules a
+  // second look instead, so this asserts the silence and the deterministic job
+  // id that collapses repeat taps — not a deduplicated prompt.
+  it("says nothing on an unconfirmed tap and schedules one re-check per person", async () => {
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
       requireFollow: true,
@@ -1471,9 +1675,23 @@ describe("durable Zernio postback delivery", () => {
       followTap.data = { ...followTap.data, payload: "followcheck:auto_789" };
       await process(followTap);
       await process({ ...followTap, id: "redelivery" });
+
+      // Nothing was sent: the gate does not accuse anyone before it has given
+      // Instagram's follow status time to catch up.
       expect(
         fetchMock.mock.calls.filter(([, init]) => init.method === "POST"),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
+
+      // Both taps scheduled under the same id, so BullMQ keeps exactly one
+      // pending check rather than one per tap.
+      const scheduled = mockQueueAdd.mock.calls.filter(
+        ([name]) => name === "process-followcheck",
+      );
+      expect(scheduled).toHaveLength(2);
+      for (const [, , opts] of scheduled) {
+        expect(opts.jobId).toBe("followrecheck_auto_789_commenter_999");
+        expect(opts.delay).toBe(60_000);
+      }
     } finally {
       vi.unstubAllGlobals();
     }

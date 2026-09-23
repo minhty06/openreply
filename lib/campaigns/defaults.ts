@@ -54,6 +54,16 @@ export const FOLLOW_PROMPT_RETRY =
   "i'll send your link right over";
 
 /**
+ * Third and last prompt. It says the link is coming either way, which is both
+ * true and the point: someone stuck behind a status check they cannot see or
+ * influence should not be left guessing whether the gate is broken.
+ */
+export const FOLLOW_PROMPT_LAST_CALL =
+  "still can't see the follow on my end. tap my profile above, follow, then " +
+  "hit the button one more time — if it still doesn't come through i'll just " +
+  "send it over anyway";
+
+/**
  * Sent with the link once someone has made FOLLOW_GATE_GRACE_AFTER honest
  * attempts. Nobody should be able to get permanently stuck behind a status
  * check they cannot influence, so the gate gives up rather than trap them.

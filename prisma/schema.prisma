@@ -81,6 +81,7 @@ model Workspace {
   instagramAccounts InstagramAccount[]
   automations       Automation[]
   dmLogs            DmLog[]
+  followGateAttempts FollowGateAttempt[]
   trackedLinks      TrackedLink[]
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
@@ -220,6 +221,7 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  followGateAttempts FollowGateAttempt[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
@@ -418,6 +420,35 @@ model ZernioConnection {
 }
 
 // Claims persist independently of BullMQ retention so old taps never resend.
+/// Per-person record of follow checks that came back an explicit "not
+/// following" AFTER the delayed re-check had already given Instagram's status
+/// API time to catch up. It exists so the gate can escalate its wording and
+/// then give up rather than loop forever, and so the bounce is countable at
+/// all — before this, a refused tap wrote nothing anywhere.
+///
+/// Only an explicit `false` is recorded. An unknown status never lands here;
+/// see lib/automation/follow-gate.ts for why that distinction matters.
+model FollowGateAttempt {
+  automationId String
+  userId       String // Instagram-scoped user id (IGSID)
+  workspaceId  String
+
+  attempts       Int       @default(0)
+  firstAttemptAt DateTime  @default(now())
+  lastAttemptAt  DateTime  @updatedAt
+  lastPromptAt   DateTime?
+  /// Set once the gate has given this person the link on good faith, so the
+  /// grace note is sent only the first time.
+  grantedAt      DateTime?
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@id([automationId, userId])
+  @@index([workspaceId])
+  @@index([lastAttemptAt])
+}
+
 model PostbackDelivery {
   id String @id
   createdAt DateTime @default(now())
