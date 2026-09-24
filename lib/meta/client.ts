@@ -34,6 +34,23 @@ export class RateLimitError extends MetaApiError {
   }
 }
 
+/**
+ * A send whose outcome is unknown: it may have been delivered before the
+ * request failed. Resending would message the person twice, so this is never
+ * retried — neither by the queue nor by the polling sweep.
+ */
+export class DeliveryUnconfirmedError extends MetaApiError {
+  constructor(detail?: string) {
+    super(
+      502,
+      undefined,
+      undefined,
+      `Message delivery is unconfirmed. Inspect the Instagram inbox before retrying.${detail ? ` (${detail})` : ""}`
+    );
+    this.name = "DeliveryUnconfirmedError";
+  }
+}
+
 export class PermissionError extends MetaApiError {
   constructor(message: string, fbTraceId?: string) {
     super(100, undefined, fbTraceId, message);

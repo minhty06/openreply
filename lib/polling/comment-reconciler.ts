@@ -64,6 +64,20 @@ function errMessage(error: unknown): string {
   return "Unknown error";
 }
 
+/**
+ * Earliest comment time a campaign's sweep may act on. The sweep recovers
+ * comments whose webhook was lost while the campaign was running; a comment
+ * left before the campaign existed was never its to answer. Without this, a
+ * new campaign on an older post — e.g. one moved over from another tool that
+ * already DM'd those people — messages everyone from the last few days at once.
+ */
+export function sweepWindowStart(
+  campaignCreatedAt: Date,
+  lookbackStartMs: number
+): number {
+  return Math.max(lookbackStartMs, campaignCreatedAt.getTime());
+}
+
 /** One reconciliation pass across every active campaign. */
 export async function reconcileComments(): Promise<void> {
   const automations = await prisma.automation.findMany({
@@ -78,6 +92,7 @@ export async function reconcileComments(): Promise<void> {
       wholeWordMatch: true,
       publicReplyEnabled: true,
       workspaceId: true,
+      createdAt: true,
       instagramAccount: {
         select: {
           id: true,
@@ -98,7 +113,7 @@ export async function reconcileComments(): Promise<void> {
   for (const automation of automations) {
     const stat = await sweepCampaign({
       automation: automation,
-      sinceMs: sinceMs,
+      sinceMs: sweepWindowStart(automation.createdAt, sinceMs),
       tokenCache: tokenCache,
     }).catch(
       (error): SweepStat => ({

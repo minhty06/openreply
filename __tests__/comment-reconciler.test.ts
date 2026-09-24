@@ -13,7 +13,10 @@ const { mockPrisma } = vi.hoisted(() => ({
 
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
 
-import { adMediaFor } from "../lib/polling/comment-reconciler";
+import {
+  adMediaFor,
+  sweepWindowStart,
+} from "../lib/polling/comment-reconciler";
 
 const POST = "18023946917554990";
 const AD = "17899788633163100";
@@ -46,5 +49,19 @@ describe("adMediaFor", () => {
   it("swallows a query failure, leaving the post itself still swept", async () => {
     mockPrisma.$queryRaw.mockRejectedValue(new Error("connection lost"));
     await expect(adMediaFor(POST)).resolves.toEqual([]);
+  });
+});
+
+describe("sweepWindowStart", () => {
+  const lookbackStart = Date.parse("2026-09-21T01:00:00Z");
+
+  it("ignores comments left before a new campaign existed", () => {
+    const created = new Date("2026-09-24T01:06:21Z");
+    expect(sweepWindowStart(created, lookbackStart)).toBe(created.getTime());
+  });
+
+  it("keeps the lookback window for a campaign older than it", () => {
+    const created = new Date("2026-08-01T00:00:00Z");
+    expect(sweepWindowStart(created, lookbackStart)).toBe(lookbackStart);
   });
 });

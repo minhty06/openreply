@@ -1,4 +1,5 @@
 import {
+  DeliveryUnconfirmedError,
   MetaApiError,
   RateLimitError,
   TokenExpiredError,
@@ -16,12 +17,10 @@ export class ZernioApiError extends MetaApiError {
   }
 }
 
-export class ZernioDeliveryUnconfirmedError extends ZernioApiError {
+export class ZernioDeliveryUnconfirmedError extends DeliveryUnconfirmedError {
   constructor() {
-    super(502);
+    super();
     this.name = "ZernioDeliveryUnconfirmedError";
-    this.message =
-      "Message delivery is unconfirmed. Inspect the Instagram inbox before retrying.";
   }
 }
 

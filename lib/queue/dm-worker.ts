@@ -15,6 +15,7 @@ import {
 } from "./client";
 import { prisma } from "@/lib/db/client";
 import {
+  DeliveryUnconfirmedError,
   MetaApiError,
   RateLimitError,
   TokenExpiredError,
@@ -62,10 +63,7 @@ import {
   recordFollowGateMiss,
 } from "@/lib/automation/follow-gate";
 
-import {
-  ZernioApiError,
-  ZernioDeliveryUnconfirmedError,
-} from "@/lib/zernio/client";
+import { ZernioApiError } from "@/lib/zernio/client";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
@@ -94,7 +92,8 @@ function isTemplateRejection(error: unknown): boolean {
   if (
     error instanceof TokenExpiredError ||
     error instanceof RateLimitError ||
-    error instanceof ZernioApiError
+    error instanceof ZernioApiError ||
+    error instanceof DeliveryUnconfirmedError
   ) {
     return false;
   }
@@ -243,7 +242,8 @@ async function sendRevealDirectMessage({
           bodyText
         ),
       });
-    } catch {
+    } catch (fallbackError) {
+      if (fallbackError instanceof DeliveryUnconfirmedError) throw fallbackError;
       throw buttonError;
     }
   }
@@ -477,7 +477,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
                 commentId,
               },
             },
-            data: { publicReplyError: formatError(error), publicReplyDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError },
+            data: { publicReplyError: formatError(error), publicReplyDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError },
           })
           .catch(() => {});
       }
@@ -553,7 +553,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+          dmDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError,
         },
       });
       throw error;
@@ -621,8 +621,11 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       Boolean(automation.openingDmButtonLabel);
 
     // Follow-gating: the link is revealed only after a follow. When an opening
-    // DM is enabled it comes FIRST, and its button routes into the follow check
-    // (opening DM → follow gate → link). Without an opening DM, we check follow
+    // DM is enabled it comes FIRST, and its button is a plain `reveal:` that the
+    // postback path gates (opening DM → follow prompt → link). It must not be a
+    // `followcheck:` button: tapping "yes please" is not a claim to follow, and
+    // treating it as one skipped the campaign's prompt entirely and went
+    // straight to the lag nudge. Without an opening DM, we check follow
     // status at comment time: confirmed followers get the link now, everyone
     // else gets the "follow me first" prompt (re-verified on tap).
     let sendFollowPrompt = false;
@@ -661,9 +664,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commentId: commentId,
           text: openingText,
           buttonTitle: automation.openingDmButtonLabel as string,
-          payload: automation.requireFollow
-            ? `followcheck:${automation.id}`
-            : `reveal:${automation.id}`,
+          payload: `reveal:${automation.id}`,
           postId: mediaId,
         });
       } else if (sendFollowPrompt) {
@@ -729,7 +730,11 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
               message: fallbackMessage,
               postId: mediaId,
             });
-          } catch {
+          } catch (fallbackError) {
+            // The text may have gone out even though the send errored; a retry
+            // would repeat it.
+            if (fallbackError instanceof DeliveryUnconfirmedError)
+              throw fallbackError;
             // The first attempt consumed the comment's single private reply, so
             // this one reports "invalid for a private reply" no matter what the
             // underlying problem was. Surface the original rejection instead.
@@ -787,7 +792,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+          dmDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError,
         },
       });
       throw error;
@@ -832,9 +837,9 @@ async function sendPostbackOnce({
       await prisma.postbackDelivery.delete({ where: { id: operationId } });
       throw error;
     }
-    throw error instanceof ZernioDeliveryUnconfirmedError
+    throw error instanceof DeliveryUnconfirmedError
       ? error
-      : new ZernioDeliveryUnconfirmedError();
+      : new DeliveryUnconfirmedError();
   }
 }
 
@@ -1044,6 +1049,59 @@ async function processPostback(
   //
   // A read fallback stays fail-closed and silent throughout: the gate must not
   // be bypassable by reading the DM and waiting, so it never earns a re-check.
+  //
+  // An opening DM's `reveal:` tap is the gate's first contact, not a claim to
+  // follow, so it gets the campaign's own prompt rather than any of the above.
+  // It follows processComment's first-contact rule for an unknown status.
+  const sendGatePrompt = (text: string) =>
+    sendPostbackOnce({
+      operationId,
+      send: () =>
+        sendDirectMessageWithButton({
+          context: accessToken,
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId: userId,
+          text,
+          buttonTitle:
+            automation.followPromptButtonLabel ||
+            DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
+          payload: `followcheck:${automation.id}`,
+          profileButton: profileButtonFor(automation),
+        }),
+    });
+
+  if (!isFollowCheck && !fallback && automation.requireFollow) {
+    const follows = await getUserFollowStatus({
+      context: accessToken,
+      recipientId: userId,
+    });
+    const sendFollowPrompt =
+      accessToken.provider === "ZERNIO" ? follows === false : follows !== true;
+    if (follows === false) {
+      await recordFollowGateAsk({
+        automationId: automation.id,
+        workspaceId: automation.workspaceId,
+        userId,
+      });
+    }
+    if (sendFollowPrompt) {
+      try {
+        await sendGatePrompt(
+          renderMessageWithoutLink({
+            message: automation.followPromptMessage || FOLLOW_PROMPT_PRESET,
+            commenterName,
+          }),
+        );
+      } catch (error) {
+        console.log(
+          "[DM Worker] Failed to send follow prompt:",
+          formatError(error),
+        );
+      }
+      return;
+    }
+  }
+
   let graceGranted = false;
   if ((isFollowCheck || fallback) && automation.requireFollow) {
     const follows = await getUserFollowStatus({
@@ -1093,21 +1151,7 @@ async function processPostback(
           commenterName,
         });
         try {
-          await sendPostbackOnce({
-            operationId,
-            send: () =>
-              sendDirectMessageWithButton({
-                context: accessToken,
-                instagramAccountId: automation.instagramAccount.instagramId,
-                userId: userId,
-                text: promptText,
-                buttonTitle:
-                  automation.followPromptButtonLabel ||
-                  DEFAULT_FOLLOW_PROMPT_BUTTON_LABEL,
-                payload: `followcheck:${automation.id}`,
-                profileButton: profileButtonFor(automation),
-              }),
-          });
+          await sendGatePrompt(promptText);
           await markFollowGatePrompted({
             automationId: automation.id,
             userId,
@@ -1248,7 +1292,7 @@ async function processPostback(
     // failure the user can act on — so don't log it as FAILED and don't retry
     // it against a window that cannot reopen on its own. It still delivers in
     // the case that does work: the user replied by typing instead of tapping.
-    if (fallback && !(error instanceof ZernioDeliveryUnconfirmedError)) {
+    if (fallback && !(error instanceof DeliveryUnconfirmedError)) {
       console.log(
         "[DM Worker] Read fallback not delivered (messaging window closed):",
         formatError(error),
@@ -1273,12 +1317,12 @@ async function processPostback(
         commentId: dedupeId,
         status: "FAILED",
         errorMessage: formatError(error),
-        dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+        dmDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError,
       },
       update: {
         status: "FAILED",
         errorMessage: formatError(error),
-        dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+        dmDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError,
       },
     });
     throw error;
@@ -1596,13 +1640,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+          dmDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError,
         },
         update: {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+          dmDeliveryUnconfirmed: error instanceof DeliveryUnconfirmedError,
         },
       });
       throw error;
@@ -1632,7 +1676,7 @@ async function processJob(job: Job<DmQueueJob>): Promise<void> {
   try {
     await dispatchJob(job);
   } catch (error) {
-    if (error instanceof ZernioDeliveryUnconfirmedError)
+    if (error instanceof DeliveryUnconfirmedError)
       throw new UnrecoverableError(error.message);
     throw error;
   }

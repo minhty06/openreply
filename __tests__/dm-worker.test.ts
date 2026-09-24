@@ -91,6 +91,15 @@ vi.mock("@/lib/meta/client", () => ({
   RateLimitError: class RateLimitError extends Error {
     name = "RateLimitError";
   },
+  DeliveryUnconfirmedError: class DeliveryUnconfirmedError extends Error {
+    code = 502;
+    constructor(detail?: string) {
+      super(
+        `Message delivery is unconfirmed. Inspect the Instagram inbox before retrying.${detail ? ` (${detail})` : ""}`
+      );
+      this.name = "DeliveryUnconfirmedError";
+    }
+  },
 }));
 
 vi.mock("@/lib/meta/oauth", () => ({
@@ -143,6 +152,7 @@ vi.mock("bullmq", () => {
 });
 
 import { createDMWorker } from "../lib/queue/dm-worker";
+import { MetaApiError } from "@/lib/meta/client";
 
 const usagePeriodStart = new Date("2026-05-01T00:00:00.000Z");
 
@@ -498,7 +508,7 @@ describe("DM Worker — Full Pipeline", () => {
   });
 
   it("should log FAILED, release usage, and re-throw when private reply sending fails", async () => {
-    const error = new Error("API Error");
+    const error = new MetaApiError(100, undefined, undefined, "API Error");
     mockSendPrivateReply.mockRejectedValue(error);
 
     const processor = getProcessor();
@@ -517,9 +527,50 @@ describe("DM Worker — Full Pipeline", () => {
       },
       data: expect.objectContaining({
         status: "FAILED",
-        errorMessage: "API Error",
+        errorMessage: expect.stringContaining("API Error"),
+        dmDeliveryUnconfirmed: false,
       }),
     });
+  });
+
+  // Meta answers some private replies that DID deliver with code 1. Retrying
+  // them sent the same opening DM to each commenter three times.
+  it("never retries a send Meta answers with an unknown error", async () => {
+    mockSendPrivateReply.mockRejectedValue(
+      new MetaApiError(1, undefined, undefined, "An unknown error has occurred.")
+    );
+
+    const processor = getProcessor();
+
+    await expect(processor(createMockJob())).rejects.toMatchObject({
+      name: "UnrecoverableError",
+      message: expect.stringContaining("An unknown error has occurred."),
+    });
+    expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+    // The polling sweep skips unconfirmed rows, so it cannot resend either.
+    expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          dmDeliveryUnconfirmed: true,
+        }),
+      })
+    );
+  });
+
+  it("never retries a send whose connection dropped", async () => {
+    mockSendPrivateReply.mockRejectedValue(new TypeError("fetch failed"));
+
+    const processor = getProcessor();
+
+    await expect(processor(createMockJob())).rejects.toMatchObject({
+      name: "UnrecoverableError",
+    });
+    expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ dmDeliveryUnconfirmed: true }),
+      })
+    );
   });
 
   it("should handle missing access token", async () => {
@@ -717,7 +768,7 @@ describe("DM Worker — Full Pipeline", () => {
     );
   });
 
-  it("should send the opening DM first (routing to the follow check) when both opening DM and follow-gate are on", async () => {
+  it("should send the opening DM first (routing to the gated reveal) when both opening DM and follow-gate are on", async () => {
     mockPrisma.automation.findMany.mockResolvedValue([
       {
         ...mockAutomation,
@@ -739,20 +790,102 @@ describe("DM Worker — Full Pipeline", () => {
     const processor = getProcessor();
     await processor(createMockJob());
 
-    // Opening DM goes out first; its button routes into the follow check.
+    // Opening DM goes out first. Its button is a plain reveal: tapping it is
+    // not a claim to follow, so it must not skip the follow prompt.
     expect(mockSendPrivateReplyWithButton).toHaveBeenCalledWith(
       "decrypted_token",
       "ig_456",
       "comment_555",
       "Hey commenter_user, welcome!",
       "Get the link",
-      "followcheck:auto_789",
+      "reveal:auto_789",
       // No profile button configured, so the opening DM carries only the postback.
       undefined
     );
     // Follow status is verified on the tap, not at comment time.
     expect(mockGetUserFollowStatus).not.toHaveBeenCalled();
     expect(mockSendPrivateReplyWithLinkButton).not.toHaveBeenCalled();
+  });
+
+  // The bug this pins: the opening DM's button used to be `followcheck:`, so
+  // "yes please" was taken as "i'm following", went silent for a minute, and
+  // then sent the lag nudge. The campaign's own prompt never went out at all.
+  describe("follow gate — an opening DM tap", () => {
+    function openerTap() {
+      return createMockPostbackJob({
+        instagramAccountId: "ig_456",
+        userId: "commenter_999",
+        payload: "reveal:auto_789",
+      });
+    }
+
+    beforeEach(() => {
+      mockPrisma.automation.findMany.mockResolvedValue([]);
+      mockPrisma.automation.findFirst.mockResolvedValue({
+        ...mockAutomation,
+        openingDmEnabled: true,
+        openingDmMessage: "youre here for the sample itinerary?",
+        openingDmButtonLabel: "yes please :)",
+        requireFollow: true,
+        followPromptMessage: "quick favor {username}",
+        followPromptButtonLabel: "i'm following",
+        followProfileButtonEnabled: true,
+        followProfileButtonLabel: "follow me",
+        instagramAccount: {
+          ...mockAutomation.instagramAccount,
+          username: "nomadminh",
+        },
+        trackedLinks: [],
+      });
+    });
+
+    it("sends the campaign's follow prompt to a non-follower", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(false);
+
+      await getProcessor()(openerTap());
+
+      expect(mockSendDirectMessageWithButton).toHaveBeenCalledTimes(1);
+      const [, , userId, text, buttonTitle, payload, profileButton] =
+        mockSendDirectMessageWithButton.mock.calls[0];
+      expect(userId).toBe("commenter_999");
+      expect(text).toBe("quick favor commenter_user");
+      expect(buttonTitle).toBe("i'm following");
+      expect(payload).toBe("followcheck:auto_789");
+      expect(profileButton).toEqual({ username: "nomadminh", title: "follow me" });
+      // An ask, not a miss: it must not spend the person's two chances.
+      expect(mockPrisma.followGateAttempt.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.not.objectContaining({ attempts: 1 }),
+        })
+      );
+      expect(
+        mockQueueAdd.mock.calls.some(([name]) => name === "process-followcheck")
+      ).toBe(false);
+      expect(mockSendDirectMessage).not.toHaveBeenCalled();
+      expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    });
+
+    it("prompts rather than delivers when follow status is unknown", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(null);
+
+      await getProcessor()(openerTap());
+
+      expect(mockSendDirectMessageWithButton).toHaveBeenCalledTimes(1);
+      expect(mockSendDirectMessageWithButton.mock.calls[0][3]).toBe(
+        "quick favor commenter_user"
+      );
+      expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    });
+
+    it("delivers the link straight away to someone already following", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(true);
+
+      await getProcessor()(openerTap());
+
+      expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
+      expect(mockReserveWorkspaceDMSend).toHaveBeenCalled();
+      expect(mockSendDirectMessage).toHaveBeenCalled();
+    });
   });
 
   it("should deliver the next DM from a read fallback when no button tap has sent it yet", async () => {
@@ -1125,7 +1258,12 @@ describe("DM Worker — Full Pipeline", () => {
       trackedLinks: [],
     });
     mockSendDirectMessage.mockRejectedValue(
-      new Error("This message is sent outside of allowed window.")
+      new MetaApiError(
+        10,
+        2534022,
+        undefined,
+        "This message is sent outside of allowed window."
+      )
     );
 
     const processor = getProcessor();
@@ -1211,7 +1349,12 @@ describe("DM Worker — one private reply per comment", () => {
       },
     ]);
     mockSendPrivateReplyWithLinkButton.mockRejectedValue(
-      new Error("The comment is invalid for a private reply")
+      new MetaApiError(
+        100,
+        undefined,
+        undefined,
+        "The comment is invalid for a private reply"
+      )
     );
 
     const processor = getProcessor();
@@ -1230,7 +1373,9 @@ describe("DM Worker — one private reply per comment", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           status: "FAILED",
-          errorMessage: "The comment is invalid for a private reply",
+          errorMessage: expect.stringContaining(
+            "The comment is invalid for a private reply"
+          ),
         }),
       })
     );
@@ -1250,7 +1395,7 @@ describe("DM Worker — one private reply per comment", () => {
       },
     ]);
     mockSendPrivateReplyWithLinkButton.mockRejectedValue(
-      new Error("Unsupported message template")
+      new MetaApiError(100, undefined, undefined, "Unsupported message template")
     );
 
     const processor = getProcessor();
@@ -1262,6 +1407,30 @@ describe("DM Worker — one private reply per comment", () => {
         data: expect.objectContaining({ status: "SENT" }),
       })
     );
+  });
+
+  it("does not send the plain-text copy when the button template may have delivered", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...mockAutomation,
+        trackedLinks: [
+          {
+            slug: "abc123",
+            label: null,
+            destinationUrl: "https://example.com",
+          },
+        ],
+      },
+    ]);
+    mockSendPrivateReplyWithLinkButton.mockRejectedValue(
+      new MetaApiError(1, undefined, undefined, "An unknown error has occurred.")
+    );
+
+    const processor = getProcessor();
+    await expect(processor(createMockJob())).rejects.toMatchObject({
+      name: "UnrecoverableError",
+    });
+    expect(mockSendPrivateReply).not.toHaveBeenCalled();
   });
 });
 

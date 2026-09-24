@@ -1,4 +1,5 @@
 export {
+  DeliveryUnconfirmedError,
   MetaApiError,
   RateLimitError,
   TokenExpiredError,
