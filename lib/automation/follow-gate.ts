@@ -14,8 +14,8 @@
  * a minute of nothing after tapping a button reads as broken, and people left.
  *
  * The cost of that generosity is bounded and worth naming: someone determined
- * to game it gets exactly one link per campaign, having spent two taps to
- * obtain what one real follow would have given them on the first.
+ * to game it gets the link after two taps per ask, which one real follow would
+ * have given them on the first.
  */
 
 import { prisma } from "@/lib/db/client";
@@ -70,6 +70,11 @@ export async function recordFollowGateMiss({
  * confirmed `false` is ever recorded: an unknown status could be someone who
  * already follows, and crediting a campaign for them would inflate the number
  * with people it never won.
+ *
+ * It also starts a fresh round of misses. The count used to live for the life
+ * of the campaign, so anyone asked a second time (a new comment, a second tap
+ * on the opening DM) arrived already one miss down, and their first honest
+ * "i'm following" skipped the lag nudge and went straight to the grace note.
  */
 export async function recordFollowGateAsk({
   automationId,
@@ -92,7 +97,8 @@ export async function recordFollowGateAsk({
     },
     // Keep the original askedAt: the first ask is when this campaign started
     // working on them, and a later re-ask should not restart the clock.
-    update: { lastPromptAt: now },
+    // grantedAt is kept too, so the grace note is still only ever said once.
+    update: { lastPromptAt: now, attempts: 0 },
   });
 }
 

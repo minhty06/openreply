@@ -852,10 +852,12 @@ describe("DM Worker — Full Pipeline", () => {
       expect(buttonTitle).toBe("i'm following");
       expect(payload).toBe("followcheck:auto_789");
       expect(profileButton).toEqual({ username: "nomadminh", title: "follow me" });
-      // An ask, not a miss: it must not spend the person's two chances.
+      // An ask, not a miss: it must not spend the person's two chances, and
+      // it starts a fresh round so a returning person is not one miss down.
       expect(mockPrisma.followGateAttempt.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           create: expect.not.objectContaining({ attempts: 1 }),
+          update: expect.objectContaining({ attempts: 0 }),
         })
       );
       expect(
