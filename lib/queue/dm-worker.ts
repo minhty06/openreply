@@ -54,7 +54,6 @@ import {
   FOLLOW_PROMPT_PRESET,
 } from "@/lib/campaigns/defaults";
 import {
-  FOLLOW_GATE_RECHECK_DELAY_MS,
   decideFollowGateAction,
   recordFollowGateAsk,
   recordFollowGateConversion,
@@ -849,59 +848,6 @@ async function sendPostbackOnce({
  * IGSID (same id as their comment author id), which we DM directly.
  */
 /**
- * Schedule the second look at follow status after a tap we could not confirm.
- *
- * The job id is bucketed by the re-check window rather than fixed per person,
- * and the distinction matters more than it looks. BullMQ retains completed
- * jobs (removeOnComplete: count 1000) and silently drops an `add` whose id is
- * still retained — it returns the old job and throws nothing. With a fixed id,
- * a person was therefore re-checked exactly once, and every later tap of
- * theirs did nothing at all: no re-check, no prompt, no link, until 1000 other
- * jobs evicted theirs from the completed set. That is the same silence this
- * whole path exists to prevent.
- *
- * Bucketing keeps what the fixed id was actually for: taps inside one window
- * collapse to a single pending check, so a rapid tapper still gets one reply
- * rather than six. A tap in a later window gets its own fresh check.
- *
- * Credit to diwenne/openreply#73, which found this.
- */
-async function scheduleFollowRecheck({
-  job,
-  automation,
-  userId,
-}: {
-  job: Job<ProcessPostbackJob>;
-  automation: { id: string };
-  userId: string;
-}): Promise<void> {
-  try {
-    await getDMQueue().add(
-      FOLLOWCHECK_JOB_NAME,
-      {
-        accountConnectionId: job.data.accountConnectionId,
-        instagramAccountId: job.data.instagramAccountId,
-        userId,
-        payload: job.data.payload,
-      },
-      {
-        jobId: `followrecheck_${automation.id}_${userId}_${Math.floor(
-          Date.now() / FOLLOW_GATE_RECHECK_DELAY_MS,
-        )}`,
-        delay: FOLLOW_GATE_RECHECK_DELAY_MS,
-      },
-    );
-  } catch (error) {
-    // A duplicate id means a check is already pending for this person, which
-    // is the intended outcome rather than a problem.
-    console.log(
-      "[DM Worker] Could not schedule follow re-check:",
-      formatError(error),
-    );
-  }
-}
-
-/**
  * Record a follow-gate bounce where the operator can actually see it. Until
  * this existed a refused tap wrote nothing anywhere, so there was no way to
  * tell one confused person from a hundred.
@@ -932,7 +878,7 @@ async function recordFollowGateEvent({
         level: "INFO",
         message: granted
           ? `Follow gate sent the link on good faith after ${attempts} unconfirmed attempts`
-          : "Follow gate could not confirm a follow after the delayed re-check",
+          : "Follow gate could not confirm a follow after a tap",
         payload: {
           automationId,
           userId,
@@ -953,7 +899,6 @@ async function recordFollowGateEvent({
 
 async function processPostback(
   job: Job<ProcessPostbackJob>,
-  { isRecheck = false }: { isRecheck?: boolean } = {},
 ): Promise<void> {
   const { instagramAccountId, userId, payload, fallback } = job.data;
 
@@ -1040,12 +985,10 @@ async function processPostback(
   // fail-open, so a real follower is never trapped by an API that reports a
   // rate-limit and a stranger identically.
   //
-  // An explicit "not following" is handled in two stages, because Instagram
-  // takes a few seconds to register a fresh follow and an honest person who
-  // taps quickly lands here. The first refusal after a tap therefore says
-  // nothing at all and schedules a second look; only that second look counts
-  // as a miss, escalates the wording, and eventually gives up and sends the
-  // link. See lib/automation/follow-gate.ts.
+  // An explicit "not following" counts as a miss and is answered on the spot:
+  // the first miss explains Instagram's follow lag and asks for one more tap,
+  // and the next one gives up and sends the link. Nobody is ever left waiting
+  // on a reply. See lib/automation/follow-gate.ts.
   //
   // A read fallback stays fail-closed and silent throughout: the gate must not
   // be bypassable by reading the DM and waiting, so it never earns a re-check.
@@ -1120,14 +1063,8 @@ async function processPostback(
     if (follows === false) {
       if (fallback) return;
 
-      if (!isRecheck) {
-        await scheduleFollowRecheck({ job, automation, userId });
-        return;
-      }
-
-      // The delayed look also came back false, so this counts. Only an
-      // explicit false ever reaches here — an unknown status fell through
-      // above, and must never consume someone's patience budget.
+      // Only an explicit false ever reaches here — an unknown status fell
+      // through above, and must never consume someone's patience budget.
       const { attempts, grantedAt } = await recordFollowGateMiss({
         automationId: automation.id,
         workspaceId: automation.workspaceId,
@@ -1658,10 +1595,10 @@ async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
   }
+  // Nothing schedules these any more. Kept so delayed re-checks queued before
+  // the silent minute was removed still drain as ordinary taps.
   if (job.name === FOLLOWCHECK_JOB_NAME) {
-    return processPostback(job as Job<ProcessPostbackJob>, {
-      isRecheck: true,
-    });
+    return processPostback(job as Job<ProcessPostbackJob>);
   }
   if (job.name === FOLLOWUP_JOB_NAME) {
     return processFollowUp(job as Job<ProcessFollowUpJob>);

@@ -43,16 +43,16 @@ export const FOLLOW_PROMPT_PRESET =
   "resource right after :)";
 
 /**
- * The one nudge after a delayed re-check still could not see the follow.
- * Instagram's follow status lags a fresh follow by a few seconds, so even here
- * the likeliest explanation is an honest follower rather than a chancer, and
- * the copy says so instead of accusing them. The next miss gives up and sends
- * the link.
+ * The one nudge when a tap on "i'm following" cannot see the follow.
+ * Instagram's follow status lags a fresh follow by a few seconds, so the
+ * likeliest explanation is an honest follower rather than a chancer, and the
+ * copy says so instead of accusing them. It asks for another tap now rather
+ * than telling them to wait: the next miss gives up and sends the link.
  */
 export const FOLLOW_PROMPT_RETRY =
-  "instagram sometimes takes a minute to register a new follow. here's my " +
-  "profile if you need it. tap the button again once it goes through and " +
-  "i'll send your link right over";
+  "instagram can take a few seconds to register a new follow. here's my " +
+  "profile if you need it. tap the button again and i'll send your link " +
+  "right over";
 
 /**
  * Sent with the link once someone has made FOLLOW_GATE_GRACE_AFTER honest

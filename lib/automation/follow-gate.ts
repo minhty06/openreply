@@ -8,28 +8,18 @@
  * that treats every unconfirmed tap as a lie therefore accuses honest people,
  * and — before this module — did so on a loop, silently, forever.
  *
- * So refusals are handled in two stages. A tap that cannot be confirmed says
- * nothing at all and looks again a minute later, which is where the lag case
- * resolves without anyone being told off. Only the second look counts as a
- * miss: the first miss explains the lag and asks once more, and the next one
- * gives up and sends the link.
+ * So every tap gets an answer straight away, and a refusal never accuses. The
+ * first miss explains the lag and asks for one more tap, and the next one gives
+ * up and sends the link. There is deliberately no silent wait-and-look-again:
+ * a minute of nothing after tapping a button reads as broken, and people left.
  *
  * The cost of that generosity is bounded and worth naming: someone determined
- * to game it gets exactly one link per campaign, having spent two taps and a
- * couple of minutes to obtain what one real follow would have given them
- * immediately.
+ * to game it gets exactly one link per campaign, having spent two taps to
+ * obtain what one real follow would have given them on the first.
  */
 
 import { prisma } from "@/lib/db/client";
 import { FOLLOW_PROMPT_RETRY } from "@/lib/campaigns/defaults";
-
-/**
- * How long to wait before looking at follow status a second time. Comfortably
- * longer than Instagram's propagation lag, and far inside the 24-hour
- * messaging window, which the tap itself just refreshed. Deliberately not
- * configurable: it is a property of Instagram's API, not a campaign setting.
- */
-export const FOLLOW_GATE_RECHECK_DELAY_MS = 60_000;
 
 /** Confirmed misses after which the gate gives up and sends the link. */
 export const FOLLOW_GATE_GRACE_AFTER = 2;

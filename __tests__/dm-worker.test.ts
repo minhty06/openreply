@@ -1007,91 +1007,38 @@ describe("DM Worker — Full Pipeline", () => {
       mockPrisma.automation.findFirst.mockResolvedValue(gatedAutomation());
     });
 
-    it("says nothing and schedules a second look, spending no quota", async () => {
+    // The bug this pins: an unconfirmed tap used to say nothing and look again
+    // a minute later. A minute of silence after tapping a button reads as
+    // broken, and people gave up before the re-check ever answered them.
+    it("answers an unconfirmed tap straight away, spending no quota", async () => {
       mockGetUserFollowStatus.mockResolvedValue(false);
+      mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+        attempts: 1,
+        grantedAt: null,
+      });
 
       await getProcessor()(followTap());
 
-      // Instagram lags a fresh follow, so an honest follower who taps fast
-      // must not be told off before that has had time to settle.
-      expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
-      expect(mockSendDirectMessage).not.toHaveBeenCalled();
+      expect(mockSendDirectMessageWithButton).toHaveBeenCalledTimes(1);
+      expect(
+        mockQueueAdd.mock.calls.some(([name]) => name === "process-followcheck")
+      ).toBe(false);
       // A bounce has always been free, and must stay free.
       expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
-      expect(mockPrisma.followGateAttempt.upsert).not.toHaveBeenCalled();
-
-      expect(mockQueueAdd).toHaveBeenCalledWith(
-        "process-followcheck",
-        expect.objectContaining({
-          userId: "commenter_999",
-          payload: "followcheck:auto_789",
-        }),
-        expect.objectContaining({
-          // Bucketed by re-check window, so a later tap is not swallowed.
-          jobId: expect.stringMatching(
-            /^followrecheck_auto_789_commenter_999_\d+$/
-          ),
-          delay: 60_000,
-        })
-      );
     });
 
-    // The bug this pins: with a fixed job id, BullMQ silently drops an add
-    // whose id is still in the retained completed set, so a person was
-    // re-checked once and then met with total silence on every later tap. The
-    // existing burst test passes either way, because it stays inside one
-    // window — only a tap in a LATER window distinguishes the two.
-    it("schedules a fresh check for a tap in a later window", async () => {
-      mockGetUserFollowStatus.mockResolvedValue(false);
-      const processor = getProcessor();
-
-      await processor(followTap());
-      const firstId = mockQueueAdd.mock.calls.find(
-        ([name]) => name === "process-followcheck"
-      )?.[2]?.jobId;
-
-      // Well past the re-check window, the way a tap the next day would be.
-      // Date.now is stubbed rather than using fake timers, which would also
-      // capture the worker's own async scheduling.
-      const realNow = Date.now;
-      const later = realNow() + 10 * 60_000;
-      vi.spyOn(Date, "now").mockImplementation(() => later);
-      try {
-        mockQueueAdd.mockClear();
-        await processor(followTap());
-      } finally {
-        vi.spyOn(Date, "now").mockRestore();
-      }
-      const secondId = mockQueueAdd.mock.calls.find(
-        ([name]) => name === "process-followcheck"
-      )?.[2]?.jobId;
-
-      expect(firstId).toBeDefined();
-      expect(secondId).toBeDefined();
-      expect(secondId).not.toBe(firstId);
-    });
-
-    it("collapses a burst of taps into one check", async () => {
-      mockGetUserFollowStatus.mockResolvedValue(false);
-      const processor = getProcessor();
-
-      await processor(followTap());
-      await processor(followTap());
-      await processor(followTap());
-
-      // Same window, so one id: the rapid tapper gets one reply, not three.
-      const ids = new Set(
-        mockQueueAdd.mock.calls
-          .filter(([name]) => name === "process-followcheck")
-          .map(([, , opts]) => opts.jobId)
-      );
-      expect(ids.size).toBe(1);
-    });
-
-    it("delivers silently when the second look finds the follow", async () => {
+    it("still drains a re-check queued before the silent minute was removed", async () => {
       mockGetUserFollowStatus.mockResolvedValue(true);
 
       await getProcessor()(recheck());
+
+      expect(mockSendDirectMessage).toHaveBeenCalled();
+    });
+
+    it("delivers silently when the tap finds the follow", async () => {
+      mockGetUserFollowStatus.mockResolvedValue(true);
+
+      await getProcessor()(followTap());
 
       // The lag case, resolved with a link and no lecture.
       expect(mockSendDirectMessage).toHaveBeenCalled();
@@ -1099,10 +1046,10 @@ describe("DM Worker — Full Pipeline", () => {
       expect(mockPrisma.followGateAttempt.upsert).not.toHaveBeenCalled();
     });
 
-    it("credits the campaign when the second look finds the follow", async () => {
+    it("credits the campaign when the tap finds the follow", async () => {
       mockGetUserFollowStatus.mockResolvedValue(true);
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       expect(mockPrisma.followGateAttempt.updateMany).toHaveBeenCalledWith({
         where: {
@@ -1120,7 +1067,7 @@ describe("DM Worker — Full Pipeline", () => {
     it("credits nobody when the status is unknown", async () => {
       mockGetUserFollowStatus.mockResolvedValue(null);
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       // An unknown status is not evidence of a follow, so it must not be
       // counted as one the campaign won.
@@ -1130,7 +1077,7 @@ describe("DM Worker — Full Pipeline", () => {
     it("does not spend a patience budget on an unknown status", async () => {
       mockGetUserFollowStatus.mockResolvedValue(null);
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       // An unknown status means Instagram would not say, which is not the
       // same as the person saying no — it must never count against them.
@@ -1145,13 +1092,13 @@ describe("DM Worker — Full Pipeline", () => {
         grantedAt: null,
       });
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       expect(mockSendDirectMessageWithButton).toHaveBeenCalledWith(
         "decrypted_token",
         "ig_456",
         "commenter_999",
-        expect.stringContaining("instagram sometimes takes a minute"),
+        expect.stringContaining("instagram can take a few seconds"),
         "i'm following",
         "followcheck:auto_789",
         undefined
@@ -1167,7 +1114,7 @@ describe("DM Worker — Full Pipeline", () => {
         grantedAt: null,
       });
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       // Nobody stays stuck behind a check they cannot see or influence.
       expect(mockSendDirectMessageWithButton).not.toHaveBeenCalled();
@@ -1190,7 +1137,7 @@ describe("DM Worker — Full Pipeline", () => {
         grantedAt: new Date("2026-09-01T00:00:00.000Z"),
       });
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       const sent = mockSendDirectMessage.mock.calls.map((call) => call[3]);
       expect(sent.some((text: string) => text?.includes("sending it anyway"))).toBe(
@@ -1204,7 +1151,7 @@ describe("DM Worker — Full Pipeline", () => {
     it("records the bounce where the operator can see it", async () => {
       mockGetUserFollowStatus.mockResolvedValue(false);
 
-      await getProcessor()(recheck());
+      await getProcessor()(followTap());
 
       expect(mockPrisma.operationalEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1877,10 +1824,13 @@ describe("durable Zernio postback delivery", () => {
     }
   });
 
-  // A tap that cannot be confirmed now sends nothing at all and schedules a
-  // second look instead, so this asserts the silence and the deterministic job
-  // id that collapses repeat taps — not a deduplicated prompt.
-  it("says nothing on an unconfirmed tap and schedules one re-check per person", async () => {
+  // An unconfirmed tap is answered on the spot, so a redelivered webhook must
+  // not answer it twice: the durable claim keys on the tap's mid.
+  it("answers an unconfirmed tap once, even when the webhook is redelivered", async () => {
+    mockPrisma.followGateAttempt.upsert.mockResolvedValue({
+      attempts: 1,
+      grantedAt: null,
+    });
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
       requireFollow: true,
@@ -1910,28 +1860,12 @@ describe("durable Zernio postback delivery", () => {
       await process(followTap);
       await process({ ...followTap, id: "redelivery" });
 
-      // Nothing was sent: the gate does not accuse anyone before it has given
-      // Instagram's follow status time to catch up.
       expect(
         fetchMock.mock.calls.filter(([, init]) => init.method === "POST"),
-      ).toHaveLength(0);
-
-      // Both taps scheduled under the same id, so BullMQ keeps exactly one
-      // pending check rather than one per tap.
-      const scheduled = mockQueueAdd.mock.calls.filter(
-        ([name]) => name === "process-followcheck",
-      );
-      expect(scheduled).toHaveLength(2);
-      // Both taps land in the same window, so both carry the same id and
-      // BullMQ keeps exactly one pending check.
-      const ids = new Set(scheduled.map(([, , opts]) => opts.jobId));
-      expect(ids.size).toBe(1);
-      for (const [, , opts] of scheduled) {
-        expect(opts.jobId).toMatch(
-          /^followrecheck_auto_789_commenter_999_\d+$/
-        );
-        expect(opts.delay).toBe(60_000);
-      }
+      ).toHaveLength(1);
+      expect(
+        mockQueueAdd.mock.calls.some(([name]) => name === "process-followcheck"),
+      ).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }
