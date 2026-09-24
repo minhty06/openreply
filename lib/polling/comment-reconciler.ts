@@ -78,6 +78,29 @@ export function sweepWindowStart(
   return Math.max(lookbackStartMs, campaignCreatedAt.getTime());
 }
 
+/**
+ * Ids of the comments the account owner has already replied to.
+ *
+ * Instagram lists replies as items of their own, each with `parent_id` and
+ * `from`, while the nested `replies` edge on a comment omits `from` entirely.
+ * Reading only the nested edge therefore saw no owner replies at all, and the
+ * sweep answered comments that had already been answered by hand or by another
+ * tool: a second public reply and a second DM. The nested edge is still read
+ * because Zernio does report its authors.
+ */
+export function commentsRepliedToBy(
+  comments: InstagramComment[],
+  ownerId: string
+): Set<string> {
+  const replied = new Set<string>();
+  for (const c of comments) {
+    if (c.parent_id && c.from?.id === ownerId) replied.add(c.parent_id);
+    if ((c.replies?.data ?? []).some((r) => r.from?.id === ownerId))
+      replied.add(c.id);
+  }
+  return replied;
+}
+
 /** One reconciliation pass across every active campaign. */
 export async function reconcileComments(): Promise<void> {
   const automations = await prisma.automation.findMany({
@@ -219,6 +242,7 @@ async function sweepCampaign({
 
     // Keep only comments that (a) aren't the account's own, (b) match the
     // keyword, and (c) have no reply from the account owner yet.
+    const ownerRepliedTo = commentsRepliedToBy(comments, account.instagramId);
     const needsAction = comments.filter((c) => {
       const authorId = c.from?.id;
       if (!authorId || authorId === account.instagramId) return false;
@@ -233,10 +257,7 @@ async function sweepCampaign({
       if (!matched) return false;
       stat.matched += 1;
 
-      const ownerReplied = (c.replies?.data ?? []).some(
-        (r) => r.from?.id === account.instagramId
-      );
-      if (ownerReplied) {
+      if (ownerRepliedTo.has(c.id)) {
         stat.alreadyReplied += 1;
         return false;
       }

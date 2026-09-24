@@ -15,6 +15,7 @@ vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
 
 import {
   adMediaFor,
+  commentsRepliedToBy,
   sweepWindowStart,
 } from "../lib/polling/comment-reconciler";
 
@@ -63,5 +64,68 @@ describe("sweepWindowStart", () => {
   it("keeps the lookback window for a campaign older than it", () => {
     const created = new Date("2026-08-01T00:00:00Z");
     expect(sweepWindowStart(created, lookbackStart)).toBe(lookbackStart);
+  });
+});
+
+describe("commentsRepliedToBy", () => {
+  const OWNER = "17841459358872008";
+
+  // Shape Instagram actually returns: the owner's reply appears as its own item
+  // with parent_id, and the nested replies edge carries no `from`. Reading only
+  // the nested edge found no replies, so the sweep answered comments that had
+  // already been answered, sending a second public reply and a second DM.
+  it("sees an owner reply listed as its own item", () => {
+    const replied = commentsRepliedToBy(
+      [
+        {
+          id: "reply",
+          text: "@mhdion sent!",
+          timestamp: "2026-09-24T01:55:34+0000",
+          from: { id: OWNER },
+          parent_id: "comment",
+        },
+        {
+          id: "comment",
+          text: "bus",
+          timestamp: "2026-09-24T01:55:20+0000",
+          from: { id: "commenter" },
+          replies: { data: [{ id: "reply" }] },
+        },
+      ],
+      OWNER
+    );
+    expect(replied.has("comment")).toBe(true);
+  });
+
+  it("still reads nested reply authors, which Zernio provides", () => {
+    const replied = commentsRepliedToBy(
+      [
+        {
+          id: "comment",
+          text: "bus",
+          timestamp: "2026-09-24T01:55:20+0000",
+          from: { id: "commenter" },
+          replies: { data: [{ id: "reply", from: { id: OWNER } }] },
+        },
+      ],
+      OWNER
+    );
+    expect(replied.has("comment")).toBe(true);
+  });
+
+  it("ignores replies from anyone but the owner", () => {
+    const replied = commentsRepliedToBy(
+      [
+        {
+          id: "reply",
+          text: "me too",
+          timestamp: "2026-09-24T01:56:00+0000",
+          from: { id: "someone-else" },
+          parent_id: "comment",
+        },
+      ],
+      OWNER
+    );
+    expect(replied.size).toBe(0);
   });
 });

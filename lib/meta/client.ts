@@ -89,8 +89,13 @@ export interface InstagramComment {
     username?: string;
   };
   timestamp: string;
-  // Present when the comments query asks for replies{from}. Used to tell whether
-  // the account owner has already replied to this comment.
+  // Set when this item is itself a reply. Instagram's comments edge lists
+  // replies alongside top-level comments, and this is the only place it says
+  // who wrote a reply: the nested `replies` edge returns ids and text but never
+  // `from`, whatever fields are asked for.
+  parent_id?: string;
+  // Present when the comments query asks for replies{from}. Zernio fills in
+  // `from`; Instagram's own API does not (see parent_id).
   replies?: {
     data?: { id: string; from?: { id: string; username?: string } }[];
   };
@@ -503,7 +508,7 @@ export async function getRecentMediaComments(
   const results: InstagramComment[] = [];
 
   const first = new URL(`${instagramGraphBase()}/${mediaId}/comments`);
-  first.searchParams.set("fields", "id,text,timestamp,from,replies{from}");
+  first.searchParams.set("fields", "id,text,timestamp,from,parent_id,replies{from}");
   first.searchParams.set("order", "reverse_chronological");
   first.searchParams.set("limit", "50");
   first.searchParams.set("access_token", accessToken);
